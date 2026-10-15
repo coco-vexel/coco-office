@@ -160,7 +160,9 @@ describe('toFlatOpc', () => {
 
     const out = toFlatOpc(pkg);
     expect(out).toMatch(/<pkg:part pkg:name="\/word\/document\.xml"/);
-    expect(out).toMatch(new RegExp(`pkg:contentType="${DOC_CTYPE.replace(/[.+]/g, '\\$&')}"`));
+    expect(out).toMatch(
+      new RegExp(`pkg:contentType="${DOC_CTYPE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`),
+    );
     expect(out).toMatch(/<pkg:xmlData>/);
     expect(out).toMatch(/<w:document/);
   });

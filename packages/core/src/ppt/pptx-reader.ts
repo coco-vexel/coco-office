@@ -2361,7 +2361,7 @@ function parseSmartArtModel(
   element: Element,
 ): PptSmartArtModel | undefined {
   const graphicData = allDescendantsNs(element, A_NS, 'graphicData').find((el) =>
-    (el.getAttribute('uri') ?? '').includes(DIAGRAM_URI),
+    (el.getAttribute('uri') ?? '') === DIAGRAM_URI,
   );
   if (!graphicData) return undefined;
   const relIds = allDescendantsLocal(graphicData, 'relIds')[0];

@@ -1,6 +1,7 @@
 import type { EditorHyperlink, EditorRunFormat } from './model.js';
 import { nativeParagraphText, type NativeWordBlockNode } from './native-model.js';
 import type { NativeWordListType } from './native-numbering.js';
+import { safeRenderedHyperlinkHref } from './native-url-safety.js';
 
 export const NATIVE_BLOCK_CLIPBOARD_TYPE = 'application/x-coco-word-blocks+json';
 
@@ -120,7 +121,7 @@ function serializeClipboardParagraphContent(paragraph: NativeClipboardParagraph)
     const style = clipboardRunStyle(run.format);
     let content = style ? `<span style="${escapeHtmlAttribute(style)}">${text}</span>` : text;
     if (run.hyperlink) {
-      const href = run.hyperlink.target ?? `#${run.hyperlink.anchor ?? ''}`;
+      const href = safeRenderedHyperlinkHref(run.hyperlink.target, run.hyperlink.anchor);
       const title = run.hyperlink.tooltip ? ` title="${escapeHtmlAttribute(run.hyperlink.tooltip)}"` : '';
       content = `<a href="${escapeHtmlAttribute(href)}"${title}>${content}</a>`;
     }
@@ -203,10 +204,16 @@ function clipboardElementHyperlink(element: HTMLElement): EditorHyperlink | unde
   if (!href) return undefined;
   const tooltip = element.getAttribute('title')?.trim();
   if (href.startsWith('#')) {
-    const anchor = href.slice(1);
+    let anchor = href.slice(1);
+    try {
+      anchor = decodeURIComponent(anchor);
+    } catch {
+      return undefined;
+    }
     return anchor ? { anchor, ...(tooltip ? { tooltip } : {}) } : undefined;
   }
-  return { target: href, ...(tooltip ? { tooltip } : {}) };
+  const safeHref = safeRenderedHyperlinkHref(href, undefined);
+  return safeHref === '#' ? undefined : { target: safeHref, ...(tooltip ? { tooltip } : {}) };
 }
 
 function clipboardElementFormat(element: HTMLElement): Partial<EditorRunFormat> {

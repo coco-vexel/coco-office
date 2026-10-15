@@ -116,6 +116,11 @@ After `dispose`, public APIs throw when used.
 | `doc.executeCode(code, args?, timeoutMs?, signal?)` | Execute JS in the document runtime. | Advanced runtime bridge. Do not use for normal generated document operations when a `WordDocument` is already available. |
 | `doc.plan(opts?)` | Low-level operation builder. | Advanced surface. Prefer live-object APIs for small-model code generation and workflow composition. |
 
+`executeCode` is an explicit trusted-code boundary, not a sandbox. Pass only
+application-controlled source code. Never pass document text, clipboard data,
+network responses, raw user input, or unreviewed generated code. Use `args` for
+untrusted values so they remain data rather than executable source.
+
 ## Examples
 
 Load from docx bytes:

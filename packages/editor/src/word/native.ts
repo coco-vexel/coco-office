@@ -127,6 +127,10 @@ import type {
   WordEditorSearchState,
   WordEditorTableCellPoint,
 } from './runtime.js';
+import {
+  embeddedRasterImageBlob,
+  safeEmbeddedRasterImageUrl,
+} from './native-url-safety.js';
 
 export * from './native-model.js';
 export * from './native-table-pagination.js';
@@ -5367,9 +5371,11 @@ function blobToDataUrl(file: Blob): Promise<string> {
 }
 
 function storeNativeImageClipboardSource(src: string): string {
+  const safeSrc = safeEmbeddedRasterImageUrl(src);
+  if (!safeSrc) return '';
   nextNativeImageClipboardId = (nextNativeImageClipboardId + 1) >>> 0;
   const token = `${NATIVE_IMAGE_CLIPBOARD_PREFIX}${Date.now().toString(36)}-${nextNativeImageClipboardId.toString(36)}`;
-  nativeImageClipboardSources.set(token, src);
+  nativeImageClipboardSources.set(token, safeSrc);
   while (nativeImageClipboardSources.size > 8) {
     const oldest = nativeImageClipboardSources.keys().next().value as string | undefined;
     if (!oldest) break;
@@ -5391,9 +5397,7 @@ function nativeClipboardInlineText(child: NativeWordParagraphNode['content'][num
 }
 
 async function clipboardPngBlob(src: string): Promise<Blob> {
-  const response = await fetch(src);
-  if (!response.ok) throw new Error(`Unable to load clipboard image: ${response.status}`);
-  const source = await response.blob();
+  const source = embeddedRasterImageBlob(src);
   if (source.type === 'image/png') return source;
 
   const bitmap = await createImageBitmap(source);

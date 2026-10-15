@@ -88,6 +88,11 @@ core.worksheets.getItem('Sheet1').getCell('A1').setValue('x');
 | `workbook` | `ExcelWorkbookCore` | The synchronous core workbook object living inside the runtime. |
 | `args` | `Record<string, unknown> \| undefined` | Structured-cloneable caller arguments. |
 
+`executeCode` is an explicit trusted-code boundary, not a sandbox. Pass only
+application-controlled source code. Never interpolate document content,
+clipboard data, network responses, raw user input, or unreviewed generated code
+into `code`; pass untrusted values through `args` instead.
+
 Inside `executeCode`, use synchronous core calls and return plain structured-cloneable data:
 
 ```ts

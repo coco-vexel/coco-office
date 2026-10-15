@@ -11,6 +11,10 @@ import type {
 } from './native-model.js';
 import type { EditorTableBorders } from './model.js';
 import { resolveParagraphStyle, resolveRunStyle, resolveTableCellStyle } from './style-resolver.js';
+import {
+  safeEmbeddedRasterImageUrl,
+  safeRenderedHyperlinkHref,
+} from './native-url-safety.js';
 
 export interface NativeAnchorLayoutMetadata {
   classNames: string[];
@@ -2218,7 +2222,8 @@ export function renderNativeParagraph(paragraph: NativeWordParagraphNode, option
 
 export function renderNativeImage(child: NativeWordImageNode): HTMLImageElement {
   const img = document.createElement('img');
-  img.src = child.src;
+  const safeSrc = safeEmbeddedRasterImageUrl(child.src);
+  if (safeSrc) img.src = safeSrc;
   img.alt = child.drawingId;
   img.dataset.drawingId = child.drawingId;
   if (child.revision) {
@@ -2477,12 +2482,6 @@ function renderNativeText(child: NativeWordParagraphNode['content'][number]): No
   }
   span.appendChild(document.createTextNode(child.text));
   return span;
-}
-
-function safeRenderedHyperlinkHref(target: string | undefined, anchor: string | undefined): string {
-  if (target && /^(https?:|mailto:|tel:)/i.test(target.trim())) return target.trim();
-  if (anchor) return `#${anchor}`;
-  return '#';
 }
 
 function renderNativeField(child: NativeWordFieldNode): HTMLElement {
