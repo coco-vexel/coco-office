@@ -94,14 +94,14 @@
     "@coco-vexel/coco-office": "workspace:^1.0.0",
     "prosemirror-commands": "^1.7.2",
     "prosemirror-keymap": "^1.2.3",
-    "prosemirror-model": "^1.25.11",
+    "prosemirror-model": "^1.25.12",
     "prosemirror-state": "^1.4.4",
-    "prosemirror-transform": "^1.12.0",
-    "prosemirror-view": "^1.42.2"
+    "prosemirror-transform": "^1.12.2",
+    "prosemirror-view": "^1.42.6"
   },
   "devDependencies": {
     "happy-dom": "^20.11.2",
-    "jszip": "^3.10.1",
+    "jszip": "^3.10.2",
     "vite": "^5.4.21",
     "vitest": "^2.1.9",
     "@coco-vexel/coco-office-oojson": "workspace:^1.0.0"
