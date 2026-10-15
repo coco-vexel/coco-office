@@ -1,0 +1,53 @@
+name: Feature request
+description: Propose a public SDK, editor, OOJSON, or documentation improvement
+title: 'feat: '
+labels: ['enhancement', 'needs-triage']
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Proposed area
+      options:
+        - Core / Word
+        - Core / Excel
+        - Core / PowerPoint
+        - Editor / browser demo
+        - OOJSON
+        - Documentation or packaging
+        - Cross-package
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the user problem or missing capability, not only a preferred implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Include a suggested API or user flow when relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and document-preservation considerations
+      description: Note affected formats, runtimes, public APIs, or unsupported OOXML behavior.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: I understand that large or breaking changes need maintainer agreement before implementation.
+          required: true
+        - label: I am willing to help implement or test this proposal.
+          required: false

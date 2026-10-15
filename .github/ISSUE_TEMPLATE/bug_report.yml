@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a reproducible Coco Office defect
+title: 'bug: '
+labels: ['bug', 'needs-triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Use only synthetic or sanitized files. Report security vulnerabilities through the private security advisory link instead.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Core / Word
+        - Core / Excel
+        - Core / PowerPoint
+        - Editor / browser demo
+        - OOJSON
+        - Documentation or packaging
+        - Unsure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Package version, release tag, or commit SHA.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Node/browser version, operating system, package manager, and relevant host details.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest runnable code and synthetic fixture needed to reproduce the problem.
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include complete error messages or a short sanitized log.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add relevant screenshots, OOXML details, or a link to a minimal public repository.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and pull requests.
+          required: true
+        - label: This report contains no credentials, customer documents, personal data, or unlicensed assets.
+          required: true
+        - label: This is not an undisclosed security vulnerability.
+          required: true

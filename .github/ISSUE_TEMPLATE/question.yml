@@ -1,0 +1,41 @@
+name: Usage question
+description: Ask a focused question about the public packages
+title: 'question: '
+labels: ['question', 'needs-triage']
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Package or area
+      options:
+        - Core / Word
+        - Core / Excel
+        - Core / PowerPoint
+        - Editor / browser demo
+        - OOJSON
+        - Installation or packaging
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Include a small code sample and the relevant documentation you consulted.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched the documentation, existing issues, and pull requests.
+          required: true
+        - label: This question contains no private documents, credentials, or personal data.
+          required: true
