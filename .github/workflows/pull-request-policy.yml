@@ -1,0 +1,26 @@
+name: Pull request policy
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          node - <<'NODE'
+          const title = process.env.PR_TITLE ?? '';
+          const conventional = /^(build|chore|ci|docs|feat|fix|perf|refactor|revert|test)(\([a-z0-9][a-z0-9._/-]*\))?!?: .+/;
+          if (!conventional.test(title)) {
+            console.error('PR title must follow Conventional Commits, for example: feat(word): add table metadata');
+            process.exit(1);
+          }
+          NODE

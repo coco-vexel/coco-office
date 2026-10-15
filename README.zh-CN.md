@@ -3,8 +3,8 @@
 面向浏览器和 Node.js 的 Office 文档 SDK，以及实验性的 Word、Excel、PPT
 浏览器编辑器。文档在本地读取、修改和导出，不要求安装 Office。
 
-当前为开源候选版本，尚未发布。Core/Editor 采用 Apache-2.0 路线；代码权属、
-Core、Editor、OOJSON 及三份自制 Excel 测试样例采用 Apache-2.0，范围见 [LICENSING.md](LICENSING.md)。
+项目已经开源并发布 `v1.0.0`。Core、Editor、OOJSON 及三份自制 Excel
+测试样例采用 Apache-2.0，具体范围见 [LICENSING.md](LICENSING.md)。
 
 ## 本地运行
 
@@ -23,7 +23,7 @@ corepack pnpm demo
 
 给外部开发者离线试用时，运行 `corepack pnpm bundle:sdk` 会在
 `.release-check/sdk/` 生成包含 Core 安装包、公开文档和 Word/Excel/PPT
-可运行示例的 ZIP；正式开源后，同一文件会附在对应的 GitHub Release 中。
+可运行示例的 ZIP；同一文件会附在对应的 GitHub Release 中。
 
 ## 边界
 
@@ -37,7 +37,9 @@ corepack pnpm demo
 [Excel](docs/core/excel/README.md)、[PPT](docs/core/ppt/README.md)。
 
 验证命令、包说明和 Demo 构建见 [英文 README](README.md)。
-贡献流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，公开前检查见
-[open-source-readiness.md](docs/open-source-readiness.md)。
+贡献流程和 PR 要求见 [CONTRIBUTING.md](CONTRIBUTING.md)。问题请使用仓库的
+结构化 Issue 表单；安全漏洞请按照 [SECURITY.md](SECURITY.md) 私下报告，
+不要在公开 Issue 中附加客户文档、凭证或未披露漏洞。社区参与须遵守
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 
 三个库均纳入 npm 首发。详见[功能与运行环境核对](docs/runtime-and-demos.md)、[OOJSON 说明](packages/oojson/README.md)和[npm 发布流程](docs/npm-release.md)。Demo 首页包含 OOJSON 转换页入口。

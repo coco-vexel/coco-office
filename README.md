@@ -118,6 +118,15 @@ checks. The internal regression shell is separate: `pnpm example` then
 `pnpm dev:editor`. Corpus paths are configurable; see
 [maintainer tools](packages/editor/dev/README.md).
 
+## Community and support
+
+Use the repository issue forms for reproducible bugs, feature proposals,
+documentation problems, and focused usage questions. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Report
+vulnerabilities privately according to [SECURITY.md](SECURITY.md); never attach
+customer documents, credentials, or undisclosed exploits to public issues.
+Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
 ## npm distribution
 
 All three libraries will be published to npm. Once released, install only what you need:
