@@ -244,6 +244,8 @@ function fontFamilyToCss(fontFamily: string): string {
     .split(',')
     .map((family) => family.trim())
     .filter((family) => family.length > 0);
-  const quotedFamilies = families.map((family) => `"${family.replace(/"/g, '\\"')}"`);
+  const quotedFamilies = families.map((family) =>
+    `"${family.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n\f]/g, ' ')}"`,
+  );
   return [...quotedFamilies, 'SimSun', '"Songti SC"', '"Noto Serif CJK SC"', 'serif'].join(', ');
 }

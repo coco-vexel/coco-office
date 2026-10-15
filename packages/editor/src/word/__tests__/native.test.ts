@@ -1853,6 +1853,9 @@ describe('@coco-vexel/coco-office-editor native word POC', () => {
       'font-family': '"黑体", SimSun, "Songti SC", "Noto Serif CJK SC", serif',
       color: '#00AA00',
     });
+    expect(resolveRunStyle({ fontFamily: 'Bad\\";color:red\nNext' }).declarations).toMatchObject({
+      'font-family': '"Bad\\\\\\";color:red Next", SimSun, "Songti SC", "Noto Serif CJK SC", serif',
+    });
     expect(resolveRunStyle({ shading: { fill: 'D9EAF7' } }).declarations).toMatchObject({
       'background-color': '#D9EAF7',
     });

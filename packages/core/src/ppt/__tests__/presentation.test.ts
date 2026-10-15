@@ -1542,6 +1542,13 @@ describe('Presentation P0 live-object SDK', () => {
     await expect(tableShape.table.setValues([['A1', 'B1']])).rejects.toThrow('must match 1x1');
     await expect(tableShape.table.getCell(1, 0).text()).rejects.toThrow('cell out of range');
     await expect(tableShape.table.setCellText(0, 1, 'B1')).rejects.toThrow('cell out of range');
+    await expect(
+      tableShape.table.setCellText('__proto__' as never, 0, 'polluted'),
+    ).rejects.toThrow('cell out of range');
+    await expect(
+      tableShape.table.getCell(Number.NaN, 0).setStyle({ fillColor: '#ffffff' }),
+    ).rejects.toThrow('cell out of range');
+    expect(Object.prototype).not.toHaveProperty('polluted');
     await expect(tableShape.table.addRow('end', ['A2', 'B2'])).rejects.toThrow(
       'row values must have length 1',
     );

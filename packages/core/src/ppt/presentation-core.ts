@@ -1985,48 +1985,46 @@ export class TableApiCore {
 
   _cellText(row: number, column: number): string {
     const table = this.table();
-    if (row < 0 || row >= table.rowCount || column < 0 || column >= table.columnCount) {
-      throw new Error(`Presentation: table cell out of range: ${row},${column}`);
-    }
-    return table.values[row]?.[column] ?? '';
+    const [safeRow, safeColumn] = requireTableCellCoordinates(table, row, column);
+    return table.values[safeRow]?.[safeColumn] ?? '';
   }
 
   _cellStyle(row: number, column: number): PptTableCellStyle {
     const table = this.table();
-    if (row < 0 || row >= table.rowCount || column < 0 || column >= table.columnCount) {
-      throw new Error(`Presentation: table cell out of range: ${row},${column}`);
-    }
-    return cloneModel(table.cellStyles?.[row]?.[column] ?? {});
+    const [safeRow, safeColumn] = requireTableCellCoordinates(table, row, column);
+    return cloneModel(table.cellStyles?.[safeRow]?.[safeColumn] ?? {});
   }
 
   _cellParagraphs(row: number, column: number): PptTextParagraph[] {
     const shape = this.internal();
     const table = this.table();
-    if (row < 0 || row >= table.rowCount || column < 0 || column >= table.columnCount) {
-      throw new Error(`Presentation: table cell out of range: ${row},${column}`);
-    }
-    const cell = shape.tableCells[row]?.[column];
+    const [safeRow, safeColumn] = requireTableCellCoordinates(table, row, column);
+    const cell = shape.tableCells[safeRow]?.[safeColumn];
     if (!cell) throw new Error(`Presentation: table cell out of range: ${row},${column}`);
     return textParagraphsFromElement(cell, shape.slide);
   }
 
   _setCellParagraphs(row: number, column: number, paragraphs: PptTextParagraphWrite[]): void {
     const shape = this.internal();
-    this.assertEditableCell(row, column);
-    const cell = this.requireCell(shape, row, column);
+    const [safeRow, safeColumn] = this.assertEditableCell(row, column);
+    const cell = this.requireCell(shape, safeRow, safeColumn);
     const textBody = firstChildNs(cell, A_NS, 'txBody');
     if (!textBody) throw new Error(`Presentation: table cell ${row},${column} has no text body`);
     replaceTextBodyParagraphs(textBody, paragraphs);
-    shape.model.table!.values[row]![column] = textParagraphsFromElement(cell, shape.slide)
-      .map((paragraph) => paragraph.text)
-      .join('\n');
+    shape.model.table!.values[safeRow]!.splice(
+      safeColumn,
+      1,
+      textParagraphsFromElement(cell, shape.slide)
+        .map((paragraph) => paragraph.text)
+        .join('\n'),
+    );
     markDirty(shape.slide.part);
     this.presentation._record({
       type: 'table.cell.text.paragraphs.set',
       slideId: this.slideId,
       shapeId: this.shapeId,
-      row,
-      column,
+      row: safeRow,
+      column: safeColumn,
       paragraphs,
     });
   }
@@ -2038,8 +2036,8 @@ export class TableApiCore {
     style: Partial<PptTextStyle>,
   ): void {
     const shape = this.internal();
-    this.assertEditableCell(row, column);
-    const cell = this.requireCell(shape, row, column);
+    const [safeRow, safeColumn] = this.assertEditableCell(row, column);
+    const cell = this.requireCell(shape, safeRow, safeColumn);
     const runs = flatTextRuns(cell);
     const run = runs[requireIndex(runIndex, runs.length, 'run')];
     if (!run) throw new Error(`Presentation: text run out of range: ${runIndex}`);
@@ -2047,24 +2045,25 @@ export class TableApiCore {
     applyTextStyleToRun(run, normalized);
     const table = shape.model.table!;
     table.cellStyles = ensureTableCellStyles(table.rowCount, table.columnCount, table.cellStyles);
-    table.cellStyles[row]![column] = {
-      ...table.cellStyles[row]![column],
-      textStyle: { ...table.cellStyles[row]![column]?.textStyle, ...normalized },
-    };
+    const rowStyles = table.cellStyles[safeRow]!;
+    const previousStyle = rowStyles[safeColumn];
+    rowStyles.splice(safeColumn, 1, {
+      ...previousStyle,
+      textStyle: { ...previousStyle?.textStyle, ...normalized },
+    });
     markDirty(shape.slide.part);
     this.presentation._record({
       type: 'table.cell.text.run.style.set',
       slideId: this.slideId,
       shapeId: this.shapeId,
-      row,
-      column,
+      row: safeRow,
+      column: safeColumn,
       runIndex,
       style: normalized,
     });
   }
 
   _setCellText(row: number, column: number, text: string): void {
-    this.assertEditableCell(row, column);
     this.writeCellText(row, column, text);
     this.presentation._record({
       type: 'table.cell.text.set',
@@ -2078,8 +2077,8 @@ export class TableApiCore {
 
   _setCellStyle(row: number, column: number, style: Partial<PptTableCellStyle>): void {
     const shape = this.internal();
-    this.assertEditableCell(row, column);
-    const cell = shape.tableCells[row]?.[column];
+    const [safeRow, safeColumn] = this.assertEditableCell(row, column);
+    const cell = shape.tableCells[safeRow]?.[safeColumn];
     if (!cell) throw new Error(`Presentation: table cell out of range: ${row},${column}`);
     const normalized: Partial<PptTableCellStyle> = {
       ...(style.fillColor ? { fillColor: normalizeHexColor(style.fillColor) } : {}),
@@ -2095,37 +2094,39 @@ export class TableApiCore {
       applyTextStyleToTextElements(allDescendantsNs(cell, A_NS, 't'), normalized.textStyle);
     const table = shape.model.table!;
     table.cellStyles = ensureTableCellStyles(table.rowCount, table.columnCount, table.cellStyles);
-    table.cellStyles[row]![column] = {
-      ...table.cellStyles[row]![column],
+    const rowStyles = table.cellStyles[safeRow]!;
+    const previousStyle = rowStyles[safeColumn];
+    rowStyles.splice(safeColumn, 1, {
+      ...previousStyle,
       ...normalized,
       ...(normalized.body
-        ? { body: { ...table.cellStyles[row]![column]?.body, ...normalized.body } }
+        ? { body: { ...previousStyle?.body, ...normalized.body } }
         : {}),
       ...(normalized.textStyle
-        ? { textStyle: { ...table.cellStyles[row]![column]?.textStyle, ...normalized.textStyle } }
+        ? { textStyle: { ...previousStyle?.textStyle, ...normalized.textStyle } }
         : {}),
-    };
+    });
     markDirty(shape.slide.part);
     this.presentation._record({
       type: 'table.cell.style.set',
       slideId: this.slideId,
       shapeId: this.shapeId,
-      row,
-      column,
+      row: safeRow,
+      column: safeColumn,
       style: normalized,
     });
   }
 
   private writeCellText(row: number, column: number, text: string): void {
     const shape = this.internal();
-    this.assertEditableCell(row, column);
-    const cell = shape.tableCells[row]?.[column];
+    const [safeRow, safeColumn] = this.assertEditableCell(row, column);
+    const cell = shape.tableCells[safeRow]?.[safeColumn];
     if (!cell) throw new Error(`Presentation: table cell out of range: ${row},${column}`);
     const textElements = tableCellTextElements(cell);
     if (textElements.length === 0) textElements.push(createTableCellTextRun(cell));
     textElements[0]!.textContent = text;
     for (const extra of textElements.slice(1)) extra.textContent = '';
-    shape.model.table!.values[row]![column] = text;
+    shape.model.table!.values[safeRow]!.splice(safeColumn, 1, text);
     markDirty(shape.slide.part);
   }
 
@@ -2137,10 +2138,8 @@ export class TableApiCore {
 
   private requireCell(shape: PptShapeInternal, row: number, column: number): Element {
     const table = this.table();
-    if (row < 0 || row >= table.rowCount || column < 0 || column >= table.columnCount) {
-      throw new Error(`Presentation: table cell out of range: ${row},${column}`);
-    }
-    const cell = shape.tableCells[row]?.[column];
+    const [safeRow, safeColumn] = requireTableCellCoordinates(table, row, column);
+    const cell = shape.tableCells[safeRow]?.[safeColumn];
     if (!cell) throw new Error(`Presentation: table cell out of range: ${row},${column}`);
     return cell;
   }
@@ -2151,13 +2150,16 @@ export class TableApiCore {
     }
   }
 
-  private assertEditableCell(row: number, column: number): void {
+  private assertEditableCell(row: number, column: number): [number, number] {
+    const coordinates = requireTableCellCoordinates(this.table(), row, column);
+    const [safeRow, safeColumn] = coordinates;
     const merge = this.table().mergedCells?.find(
-      (item) => item.row === row && item.column === column,
+      (item) => item.row === safeRow && item.column === safeColumn,
     );
     if (merge?.hMerge || merge?.vMerge) {
-      throw new Error(`Presentation: cannot edit merged continuation cell ${row},${column}`);
+      throw new Error(`Presentation: cannot edit merged continuation cell ${safeRow},${safeColumn}`);
     }
+    return coordinates;
   }
 
   private internal(): PptShapeInternal {
@@ -2404,6 +2406,24 @@ function requireIndex(index: number, length: number, label: string): number {
     throw new Error(`Presentation: ${label} index out of range: ${index}`);
   }
   return index;
+}
+
+function requireTableCellCoordinates(
+  table: { rowCount: number; columnCount: number },
+  row: number,
+  column: number,
+): [number, number] {
+  if (
+    !Number.isInteger(row) ||
+    !Number.isInteger(column) ||
+    row < 0 ||
+    row >= table.rowCount ||
+    column < 0 ||
+    column >= table.columnCount
+  ) {
+    throw new Error(`Presentation: table cell out of range: ${row},${column}`);
+  }
+  return [row, column];
 }
 
 function tableRowElement(doc: Document, values: string[]): Element {
