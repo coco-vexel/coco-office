@@ -1,6 +1,6 @@
 # npm release procedure
 
-All three packages are published at version `1.0.0`: `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. The workspace root stays private. Follow this procedure for subsequent releases and replace the example version and tarball names consistently.
+All three packages are published at version `1.0.1`: `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. The workspace root stays private. Follow this procedure for subsequent releases and replace the example version and tarball names consistently.
 
 ## Prepare and review
 
@@ -13,18 +13,18 @@ All three packages are published at version `1.0.0`: `@coco-vexel/coco-office`, 
 
 ## Publish after explicit approval
 
-Publish the reviewed tarballs in this order: Core, then Editor and OOJSON. Both depend on Core `^1.0.0`. Do not recursively publish the entire workspace.
+Publish the reviewed tarballs in this order: Core, then Editor and OOJSON. Both depend on Core `^1.0.1`. Do not recursively publish the entire workspace.
 
 ```bash
-npm publish .release-check/packages/coco-vexel-coco-office-1.0.0.tgz --access public
-npm publish .release-check/packages/coco-vexel-coco-office-editor-1.0.0.tgz --access public
-npm publish .release-check/packages/coco-vexel-coco-office-oojson-1.0.0.tgz --access public
+npm publish .release-check/packages/coco-vexel-coco-office-1.0.1.tgz --access public
+npm publish .release-check/packages/coco-vexel-coco-office-editor-1.0.1.tgz --access public
+npm publish .release-check/packages/coco-vexel-coco-office-oojson-1.0.1.tgz --access public
 ```
 
 Adjust filenames only when approved versions have changed, and regenerate/reverify their tarballs. If a version already exists, choose a new version and update dependents; do not attempt to replace it. Do not rebuild different bytes between review and publish.
 
 After publication, install the exact versions from the public registry into a fresh directory, repeat consumer/demo verification and confirm npm package pages and distribution tags. The current local consumer test uses tarballs; it is not evidence of a successful registry publication.
 
-GitHub source publication, npm publication and static Demo hosting are separate release actions. CI currently validates and never publishes automatically. Version `1.0.0` was published manually from the reviewed public tag; configure npm Trusted Publishing before automating subsequent releases.
+GitHub source publication, npm publication and static Demo hosting are separate release actions. CI currently validates and never publishes automatically. Releases are published manually from reviewed public tags; configure npm Trusted Publishing before automating subsequent releases.
 
 References: [npm public scoped packages](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/), [npm scopes](https://docs.npmjs.com/using-npm/scope.html/).

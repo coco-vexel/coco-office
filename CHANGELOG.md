@@ -1,0 +1,23 @@
+# Changelog
+
+All notable changes to Coco Office are documented in this file.
+
+## [1.0.1] - 2026-10-15
+
+### Security
+
+- Raised the minimum `prosemirror-view` version to `1.42.6` and `jszip` to
+  `3.10.2`.
+- Refreshed package third-party notices after dependency updates.
+
+### Maintenance
+
+- Updated compatible build and test dependencies.
+- Updated GitHub Actions to current major versions.
+
+## [1.0.0] - 2026-10-15
+
+- Initial open-source release of Core, Editor and OOJSON packages.
+
+[1.0.1]: https://github.com/coco-vexel/coco-office/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/coco-vexel/coco-office/releases/tag/v1.0.0

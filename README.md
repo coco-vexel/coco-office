@@ -6,17 +6,16 @@ query, modify and export DOCX, XLSX and PPTX locally using JavaScript.
 [中文说明](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) ·
 [Release review](docs/open-source-readiness.md)
 
-**Pre-release candidate:** public distribution awaits final release approval.
-See [LICENSING.md](LICENSING.md) for license scope. The commands below work from a
-checkout; they do not assume these versions have been published to npm.
+The project is open source and the three packages are published on npm at
+version `1.0.1`. See [LICENSING.md](LICENSING.md) for license scope.
 
 ## Packages
 
-| Package                          | Purpose                                                       | Status                                |
-| -------------------------------- | ------------------------------------------------------------- | ------------------------------------- |
-| `@coco-vexel/coco-office`        | OOXML / Flat OPC package operations and Word, Excel, PPT APIs | Initial open-source release candidate |
-| `@coco-vexel/coco-office-editor` | Word, spreadsheet and fixed-canvas PPT browser editors        | Experimental                          |
-| `@coco-vexel/coco-office-oojson` | ONLYOFFICE OOJSON ↔ OOXML / Flat OPC conversion               | Apache-2.0; npm release candidate     |
+| Package                          | Purpose                                                       | Status                |
+| -------------------------------- | ------------------------------------------------------------- | --------------------- |
+| `@coco-vexel/coco-office`        | OOXML / Flat OPC package operations and Word, Excel, PPT APIs | Published             |
+| `@coco-vexel/coco-office-editor` | Word, spreadsheet and fixed-canvas PPT browser editors        | Experimental          |
+| `@coco-vexel/coco-office-oojson` | ONLYOFFICE OOJSON ↔ OOXML / Flat OPC conversion               | Apache-2.0; published |
 
 ## Architecture boundary
 
