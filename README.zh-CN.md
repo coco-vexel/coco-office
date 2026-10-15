@@ -42,4 +42,4 @@ corepack pnpm demo
 不要在公开 Issue 中附加客户文档、凭证或未披露漏洞。社区参与须遵守
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 
-三个库均纳入 npm 首发。详见[功能与运行环境核对](docs/runtime-and-demos.md)、[OOJSON 说明](packages/oojson/README.md)和[npm 发布流程](docs/npm-release.md)。Demo 首页包含 OOJSON 转换页入口。
+三个库的 `1.0.0` 版本均已发布到 npm。详见[功能与运行环境核对](docs/runtime-and-demos.md)、[OOJSON 说明](packages/oojson/README.md)和[npm 发布流程](docs/npm-release.md)。Demo 首页包含 OOJSON 转换页入口。
