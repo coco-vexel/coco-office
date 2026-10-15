@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const license = await readFile(join(root, 'LICENSE'), 'utf8');
+const normalizeText = (value) => value.replace(/\r\n?/g, '\n').trimEnd();
 const workspacePackages = new Set([
   '@coco-vexel/coco-office',
   '@coco-vexel/coco-office-editor',
@@ -49,7 +50,8 @@ for (const target of ['core', 'editor', 'oojson']) {
         .sort();
       const texts = await Promise.all(
         files.map(
-          async (name) => `### ${name}\n\n${await readFile(join(dependencyDir, name), 'utf8')}`,
+          async (name) =>
+            `### ${name}\n\n${normalizeText(await readFile(join(dependencyDir, name), 'utf8'))}`,
         ),
       );
       if (!texts.length) {
@@ -76,7 +78,7 @@ for (const target of ['core', 'editor', 'oojson']) {
           const end = source.indexOf(ending);
           if (start < 0 || end < start)
             throw new Error(`Review embedded zlib license: ${key}/${file}`);
-          const header = source.slice(start, end + ending.length);
+          const header = normalizeText(source.slice(start, end + ending.length));
           headers.set(header, [...(headers.get(header) ?? []), `lib/zlib/${file}`]);
         }
         for (const [header, paths] of headers) {
