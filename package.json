@@ -38,7 +38,7 @@
   "devDependencies": {
     "@coco-vexel/coco-office": "workspace:^1.0.0",
     "@eslint/js": "^10.0.1",
-    "@types/node": "^25.6.0",
+    "@types/node": "^26.6.5",
     "cross-env": "^10.1.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.12.0",
