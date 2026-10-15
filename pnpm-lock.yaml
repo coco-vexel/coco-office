@@ -102,8 +102,8 @@ importers:
         specifier: workspace:^1.0.0
         version: link:../oojson
       happy-dom:
-        specifier: 20.11.2
-        version: 20.11.2
+        specifier: 21.0.1
+        version: 21.0.1
       jszip:
         specifier: ^3.10.2
         version: 3.10.2
@@ -112,7 +112,7 @@ importers:
         version: 8.3.4(@types/node@26.6.5)(esbuild@0.28.2)
       vitest:
         specifier: ^5.0.3
-        version: 5.0.3(@types/node@26.6.5)(happy-dom@20.11.2)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2))
+        version: 5.0.3(@types/node@26.6.5)(happy-dom@21.0.1)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2))
 
   packages/oojson:
     dependencies:
@@ -901,10 +901,6 @@ packages:
   globals@17.13.0:
     resolution: {integrity: sha512-RwMTC61u7hrG3ZJMkZQOK4JLJrKS8QtoTii63EmWvFXHqycY9FObBJQCbsLxSO8kjKhWE5kV1GC+Vb1g3RI0Zg==}
     engines: {node: '>=18'}
-
-  happy-dom@20.11.2:
-    resolution: {integrity: sha512-7MB+bJLkxu3SowAfBJbjW+c55kNz5tkR45gu2qzrxznezhLeN5YIlJbwUgSzlGc+qWoZ8Ykg71H5ezz69xixrw==}
-    engines: {node: '>=20.0.0'}
 
   happy-dom@21.0.1:
     resolution: {integrity: sha512-pRBs/u9fhrncyByOl58DMex0R2uAj6ZPKWIjV5j5yNGZBqLw3P6BTRhlc0DD5b/Ht4/6JYTMuE2LJhUWRC6SGw==}
@@ -2135,19 +2131,6 @@ snapshots:
 
   globals@17.13.0: {}
 
-  happy-dom@20.11.2:
-    dependencies:
-      '@types/node': 25.9.9
-      '@types/whatwg-mimetype': 3.0.2
-      '@types/ws': 8.18.2
-      buffer-image-size: 0.6.4
-      entities: 7.0.1
-      whatwg-mimetype: 3.0.0
-      ws: 8.22.0
-    transitivePeerDependencies:
-      - bufferutil
-      - utf-8-validate
-
   happy-dom@21.0.1:
     dependencies:
       '@types/node': 25.9.9
@@ -2160,7 +2143,6 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
-    optional: true
 
   hashery@1.5.1:
     dependencies:
@@ -2637,7 +2619,7 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  vitest@5.0.3(@types/node@26.6.5)(happy-dom@20.11.2)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)):
+  vitest@5.0.3(@types/node@26.6.5)(happy-dom@21.0.1)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/mocker': 5.0.3(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2))
@@ -2655,7 +2637,7 @@ snapshots:
       why-is-node-running: 3.2.1
     optionalDependencies:
       '@types/node': 26.6.5
-      happy-dom: 20.11.2
+      happy-dom: 21.0.1
     transitivePeerDependencies:
       - msw
 
