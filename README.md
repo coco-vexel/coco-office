@@ -129,7 +129,7 @@ Participation is governed by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## npm distribution
 
-All three libraries will be published to npm. Once released, install only what you need:
+All three libraries are published on npm. Install only what you need:
 
 ```bash
 npm install @coco-vexel/coco-office
