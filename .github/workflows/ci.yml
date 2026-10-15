@@ -17,6 +17,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
+          package-manager-cache: false
       - run: npm install --global corepack@0.34.6 --force
       - run: corepack pnpm install --frozen-lockfile
       - run: corepack pnpm build
