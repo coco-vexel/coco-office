@@ -1,6 +1,6 @@
 # npm release procedure
 
-All three packages are release targets at version `1.0.0`: `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. These are candidate versions, not a claim that they are available on npm. The workspace root stays private.
+All three packages are published at version `1.0.0`: `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. The workspace root stays private. Follow this procedure for subsequent releases and replace the example version and tarball names consistently.
 
 ## Prepare and review
 
@@ -25,6 +25,6 @@ Adjust filenames only when approved versions have changed, and regenerate/reveri
 
 After publication, install the exact versions from the public registry into a fresh directory, repeat consumer/demo verification and confirm npm package pages and distribution tags. The current local consumer test uses tarballs; it is not evidence of a successful registry publication.
 
-GitHub source publication, npm publication and static Demo hosting require separate concrete approval. CI currently validates and never publishes automatically. Trusted publishing can be configured once the target repository and npm scope access are finalized.
+GitHub source publication, npm publication and static Demo hosting are separate release actions. CI currently validates and never publishes automatically. Version `1.0.0` was published manually from the reviewed public tag; configure npm Trusted Publishing before automating subsequent releases.
 
 References: [npm public scoped packages](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/), [npm scopes](https://docs.npmjs.com/using-npm/scope.html/).
