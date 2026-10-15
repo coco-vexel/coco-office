@@ -100,10 +100,10 @@
     "prosemirror-view": "^1.42.2"
   },
   "devDependencies": {
-    "happy-dom": "^20.11.2",
+    "happy-dom": "^21.0.1",
     "jszip": "^3.10.1",
-    "vite": "^5.4.21",
-    "vitest": "^2.1.9",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3",
     "@coco-vexel/coco-office-oojson": "workspace:^1.0.0"
   }
 }
