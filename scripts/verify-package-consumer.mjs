@@ -1,6 +1,6 @@
 /* eslint-disable no-console -- CLI verification output. */
 import { spawnSync } from 'node:child_process';
-import { copyFile, cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,9 @@ for (const name of ['core', 'editor', 'oojson']) {
   run(process.execPath, [pnpmCli, 'pack', '--pack-destination', output], dir);
   tarballs[pkg.name] = `file:${join(output, tarballName(pkg)).replaceAll('\\', '/')}`;
 }
-const consumer = await mkdtemp(join(tmpdir(), 'coco-office-consumer-'));
+// Windows can expose TEMP through an 8.3 short path while Vite expands HTML
+// imports to the long path. Normalize once so its HTML proxy keys stay stable.
+const consumer = await realpath(await mkdtemp(join(tmpdir(), 'coco-office-consumer-')));
 await writeFile(
   join(consumer, 'package.json'),
   JSON.stringify(
