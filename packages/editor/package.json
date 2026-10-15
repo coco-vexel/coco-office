@@ -103,7 +103,7 @@
     "happy-dom": "^20.11.2",
     "jszip": "^3.10.2",
     "vite": "^5.4.21",
-    "vitest": "^2.1.9",
+    "vitest": "^4.1.11",
     "@coco-vexel/coco-office-oojson": "workspace:^1.0.0"
   }
 }
