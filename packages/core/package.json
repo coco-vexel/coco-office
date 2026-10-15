@@ -97,7 +97,7 @@
   },
   "dependencies": {
     "fontoxpath": "^3.34.0",
-    "jszip": "^3.10.1",
+    "jszip": "^3.10.2",
     "slimdom": "^4.3.5"
   },
   "devDependencies": {
