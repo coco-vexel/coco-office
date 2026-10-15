@@ -1,0 +1,15 @@
+node_modules/
+.DS_Store
+packages/*/dist/
+coverage/
+packages/editor/dev/native-regression-output/
+packages/editor/src/generated/editor-styles.ts
+*.log
+.env
+.env.*
+!.env.example
+.codex-*/
+.tmp*/
+.release-check/
+packages/editor/demo-dist/
+examples/output/

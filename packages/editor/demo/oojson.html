@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Coco OOJSON conversion</title>
+    <style>
+      body {
+        font: 16px system-ui;
+        max-width: 1000px;
+        margin: 40px auto;
+        padding: 0 20px;
+        color: #182334;
+      }
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 12px;
+        font: inherit;
+      }
+      button {
+        padding: 10px 18px;
+        margin: 12px 0;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: #f0f3f7;
+        padding: 16px;
+      }
+      output {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <a href="./index.html">Word / Excel / PowerPoint editor demo</a>
+    <h1>OOJSON conversion</h1>
+    <p>
+      Generate a minimal ONLYOFFICE-shaped document, convert to Word XML and Flat OPC, then convert
+      back. Runs locally; no ONLYOFFICE installation is required. This checks conversion, not live
+      host writeback.
+    </p>
+    <label for="text">Sample paragraph</label><textarea id="text" rows="3">Hello OOJSON</textarea>
+    <button id="convert">Convert and verify</button><output id="status" aria-live="polite"></output>
+    <h2>Word XML</h2>
+    <pre id="xml"></pre>
+    <h2>Returned JSON</h2>
+    <pre id="json"></pre>
+    <script type="module" src="./oojson.js"></script>
+  </body>
+</html>

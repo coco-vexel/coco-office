@@ -1,0 +1,51 @@
+{
+  "name": "coco-office",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.12.4",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "build": "corepack pnpm -r build",
+    "build:release": "cross-env COCO_RELEASE=1 corepack pnpm -r build",
+    "build:core": "corepack pnpm --filter @coco-vexel/coco-office build",
+    "build:editor": "corepack pnpm --filter @coco-vexel/coco-office-editor build",
+    "dev:editor": "corepack pnpm --filter @coco-vexel/coco-office-editor dev",
+    "build:oojson": "corepack pnpm --filter @coco-vexel/coco-office-oojson build",
+    "test:oojson": "corepack pnpm --filter @coco-vexel/coco-office-oojson test",
+    "test:ci": "corepack pnpm --filter @coco-vexel/coco-office test:ci && corepack pnpm --filter @coco-vexel/coco-office-editor test && corepack pnpm --filter @coco-vexel/coco-office-oojson test:portable",
+    "example": "node examples/roundtrip.mjs && node examples/oojson-roundtrip.mjs",
+    "licenses:packages": "node scripts/prepare-package-licenses.mjs",
+    "verify:packages": "node scripts/verify-package-consumer.mjs",
+    "bundle:sdk": "corepack pnpm build:core && node scripts/create-sdk-bundle.mjs",
+    "demo": "corepack pnpm --filter @coco-vexel/coco-office-editor demo",
+    "build:demo": "corepack pnpm --filter @coco-vexel/coco-office-editor build:demo",
+    "lint": "eslint packages",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@coco-vexel/coco-office": "workspace:^1.0.0",
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^25.6.0",
+    "cross-env": "^7.0.3",
+    "esbuild": "^0.21.5",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^9.1.2",
+    "globals": "^15.15.0",
+    "jszip": "^3.10.1",
+    "prettier": "^3.8.3",
+    "tsup": "^8.5.1",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.59.0",
+    "vitest": "^2.1.9",
+    "@coco-vexel/coco-office-oojson": "workspace:^1.0.0"
+  }
+}

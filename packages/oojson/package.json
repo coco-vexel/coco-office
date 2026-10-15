@@ -1,0 +1,48 @@
+{
+  "name": "@coco-vexel/coco-office-oojson",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "description": "OOJSON to OOXML / Flat OPC conversion and writeback bridge.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./package.json": "./package.json",
+    "./browser-global": "./dist/oojson.global.js"
+  },
+  "dependencies": {
+    "@coco-vexel/coco-office": "workspace:^1.0.0"
+  },
+  "scripts": {
+    "build": "esbuild src/index.mjs --bundle --format=iife --global-name=oojson --outfile=dist/oojson.global.js --legal-comments=eof --minify",
+    "test:big": "node test/raw.mjs test/captured-big",
+    "test:styles": "node test/styles-roundtrip.mjs",
+    "test:drawing": "node test/ooxml-drawing.mjs",
+    "test:writeback": "node test/writeback-adapter.mjs",
+    "test:ppt": "node test/ppt-content.mjs && node test/ppt-deck.mjs",
+    "test:ooxml": "node test/ooxml-baseline.mjs",
+    "test": "corepack pnpm test:styles && corepack pnpm test:drawing && corepack pnpm test:writeback && corepack pnpm test:ppt && corepack pnpm test:ooxml",
+    "test:portable": "corepack pnpm test:styles && corepack pnpm test:drawing && corepack pnpm test:writeback && corepack pnpm test:ppt",
+    "probe:longtail": "node test/probe-longtail.mjs",
+    "diag": "node test/diag.mjs test/captured-big",
+    "capture": "python test/capture.py"
+  },
+  "files": [
+    "src",
+    "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "main": "./src/index.mjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/coco-vexel/coco-office.git",
+    "directory": "packages/oojson"
+  },
+  "homepage": "https://github.com/coco-vexel/coco-office/tree/main/packages/oojson",
+  "bugs": {
+    "url": "https://github.com/coco-vexel/coco-office/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

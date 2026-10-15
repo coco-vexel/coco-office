@@ -1,0 +1,109 @@
+{
+  "name": "@coco-vexel/coco-office-editor",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/coco-vexel/coco-office.git",
+    "directory": "packages/editor"
+  },
+  "homepage": "https://github.com/coco-vexel/coco-office#browser-demo",
+  "bugs": {
+    "url": "https://github.com/coco-vexel/coco-office/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Coco Office browser and desktop editor runtime",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./word": {
+      "types": "./dist/word.d.ts",
+      "import": "./dist/word.js",
+      "require": "./dist/word.cjs"
+    },
+    "./spreadsheet": {
+      "types": "./dist/spreadsheet.d.ts",
+      "import": "./dist/spreadsheet.js",
+      "require": "./dist/spreadsheet.cjs"
+    },
+    "./ppt": {
+      "types": "./dist/ppt.d.ts",
+      "import": "./dist/ppt.js",
+      "require": "./dist/ppt.cjs"
+    },
+    "./ppt/native": {
+      "types": "./dist/ppt-native.d.ts",
+      "import": "./dist/ppt-native.js",
+      "require": "./dist/ppt-native.cjs"
+    },
+    "./word/prosemirror": {
+      "types": "./dist/word-prosemirror.d.ts",
+      "import": "./dist/word-prosemirror.js",
+      "require": "./dist/word-prosemirror.cjs"
+    },
+    "./word/editing": {
+      "types": "./dist/word-editing.d.ts",
+      "import": "./dist/word-editing.js",
+      "require": "./dist/word-editing.cjs"
+    },
+    "./word/native": {
+      "types": "./dist/word-native.d.ts",
+      "import": "./dist/word-native.js",
+      "require": "./dist/word-native.cjs"
+    },
+    "./styles.css": "./src/styles/editor.css",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": [
+    "./src/styles/editor.css"
+  ],
+  "files": [
+    "dist",
+    "src/styles",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "demo": "vite --config vite.demo.config.ts",
+    "build:demo": "vite build --config vite.demo.config.ts",
+    "dev": "vite --host 127.0.0.1",
+    "dev:regression": "node dev/run-native-regression.mjs",
+    "dev:ppt-edit-roundtrip": "node dev/run-ppt-edit-roundtrip.mjs",
+    "dev:ppt-reference-cross-check": "node dev/run-ppt-wps-cross-check.mjs",
+    "dev:ppt-office-cross-check": "node dev/run-ppt-wps-cross-check.mjs --reference=powerpoint",
+    "dev:ppt-wps-cross-check": "node dev/run-ppt-wps-cross-check.mjs",
+    "dev:ppt-editor-smoke": "node dev/run-ppt-editor-smoke.mjs",
+    "dev:ppt-editor-smoke:fast": "node dev/run-ppt-editor-smoke.mjs --fast",
+    "dev:ppt-editor-smoke:quick": "node dev/run-ppt-editor-smoke.mjs",
+    "dev:ppt-editor-smoke:full": "node dev/run-ppt-editor-smoke.mjs --full",
+    "dev:word-reference": "node dev/export-word-reference.mjs",
+    "test": "vitest run --config vitest.config.ts",
+    "lint": "echo 'lint config pending' && exit 0"
+  },
+  "dependencies": {
+    "@coco-vexel/coco-office": "workspace:^1.0.0",
+    "prosemirror-commands": "^1.7.2",
+    "prosemirror-keymap": "^1.2.3",
+    "prosemirror-model": "^1.25.11",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-transform": "^1.12.0",
+    "prosemirror-view": "^1.42.2"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.11.2",
+    "jszip": "^3.10.1",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9",
+    "@coco-vexel/coco-office-oojson": "workspace:^1.0.0"
+  }
+}

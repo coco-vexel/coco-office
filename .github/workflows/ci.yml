@@ -1,0 +1,31 @@
+name: Portable checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  portable:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm install --global corepack@0.34.6
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm build
+      - run: corepack pnpm test:ci
+      - run: corepack pnpm --filter @coco-vexel/coco-office report:formula-coverage:check
+      - run: corepack pnpm --filter @coco-vexel/coco-office test:types:excel
+      - run: corepack pnpm example
+      - run: corepack pnpm build:demo
+      - run: corepack pnpm licenses:packages
+      - run: corepack pnpm verify:packages
+      - run: corepack pnpm bundle:sdk
+      - run: git diff --exit-code -- packages/core/LICENSE packages/editor/LICENSE packages/core/THIRD_PARTY_NOTICES.md packages/editor/THIRD_PARTY_NOTICES.md packages/oojson/LICENSE packages/oojson/THIRD_PARTY_NOTICES.md

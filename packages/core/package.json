@@ -1,0 +1,106 @@
+{
+  "name": "@coco-vexel/coco-office",
+  "version": "1.0.0",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/coco-vexel/coco-office.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/coco-vexel/coco-office/tree/main/docs/core",
+  "bugs": {
+    "url": "https://github.com/coco-vexel/coco-office/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "CocoOffice — XML / OOXML 文档操作底座(Word / Excel / PPT)",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./pack": {
+      "types": "./dist/pack.d.ts",
+      "import": "./dist/pack.js",
+      "require": "./dist/pack.cjs"
+    },
+    "./shared": {
+      "types": "./dist/shared.d.ts",
+      "import": "./dist/shared.js",
+      "require": "./dist/shared.cjs"
+    },
+    "./word": {
+      "types": "./dist/word.d.ts",
+      "import": "./dist/word.js",
+      "require": "./dist/word.cjs"
+    },
+    "./word-view": {
+      "types": "./dist/word-view.d.ts",
+      "import": "./dist/word-view.js",
+      "require": "./dist/word-view.cjs"
+    },
+    "./excel": {
+      "types": "./dist/excel.d.ts",
+      "import": "./dist/excel.js",
+      "require": "./dist/excel.cjs"
+    },
+    "./ppt": {
+      "types": "./dist/ppt.d.ts",
+      "import": "./dist/ppt.js",
+      "require": "./dist/ppt.cjs"
+    },
+    "./excel-worker": {
+      "types": "./dist/excel-worker.d.ts",
+      "import": "./dist/excel-worker.js",
+      "require": "./dist/excel-worker.cjs"
+    },
+    "./excel-worker-browser": {
+      "types": "./dist/excel-worker-browser.d.ts",
+      "import": "./dist/excel-worker-browser.js",
+      "require": "./dist/excel-worker-browser.cjs"
+    },
+    "./kernel-worker": {
+      "types": "./dist/kernel-worker.d.ts",
+      "import": "./dist/kernel-worker.js",
+      "require": "./dist/kernel-worker.cjs"
+    },
+    "./kernel-worker-browser": {
+      "types": "./dist/kernel-worker-browser.d.ts",
+      "import": "./dist/kernel-worker-browser.js",
+      "require": "./dist/kernel-worker-browser.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test:ci": "vitest run src/__tests__/smoke.test.ts src/pack/__tests__ src/excel/__tests__/excel-workbook.test.ts src/excel/__tests__/formula-engine.test.ts src/excel/__tests__/address.test.ts src/excel/__tests__/writeback-planner.test.ts src/ppt/__tests__ src/word/__tests__/context-search.test.ts src/word/__tests__/live-object-real-docx.test.ts --no-file-parallelism --reporter=dot",
+    "test:all": "vitest run src --no-file-parallelism",
+    "report:ppt-fixtures": "node scripts/ppt-fixture-report.mjs",
+    "report:formula-coverage": "node scripts/formula-coverage-report.mjs",
+    "report:formula-coverage:check": "node scripts/formula-coverage-report.mjs --check --require-formulas ./test-fixtures/excel",
+    "fixture:formula-regression": "node scripts/create-formula-regression-fixture.mjs",
+    "test:types:excel": "tsc -p test-fixtures/excel-public-api/tsconfig.json --noEmit",
+    "test": "vitest run src/__tests__/smoke.test.ts src/pack/__tests__/flat-opc.test.ts src/word/__tests__/context-search.test.ts src/excel/__tests__/address.test.ts src/ppt/__tests__/public-export.test.ts --reporter=dot",
+    "lint": "echo 'lint config pending (#3)' && exit 0"
+  },
+  "dependencies": {
+    "fontoxpath": "^3.34.0",
+    "jszip": "^3.10.1",
+    "slimdom": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
+  }
+}

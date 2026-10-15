@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Coco Office — local document editor</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: #192b38;
+        background: #eef2f4;
+        font:
+          15px system-ui,
+          sans-serif;
+      }
+      header {
+        padding: 20px 28px;
+        background: white;
+        border-bottom: 1px solid #d7e0e5;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+      }
+      p {
+        margin: 8px 0 16px;
+        color: #526775;
+      }
+      nav {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      button,
+      .file-label {
+        padding: 9px 14px;
+        border: 1px solid #b7c7d0;
+        border-radius: 6px;
+        background: white;
+        color: inherit;
+        cursor: pointer;
+        font: inherit;
+      }
+      #save {
+        background: #174c43;
+        color: white;
+        border-color: #174c43;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: wait;
+      }
+      #status {
+        display: block;
+        margin-top: 14px;
+        min-height: 20px;
+      }
+      #editor {
+        margin: 20px auto;
+        width: calc(100% - 40px);
+        height: calc(100vh - 240px);
+        min-height: 500px;
+        overflow: auto;
+      }
+      #empty {
+        padding: 80px 24px;
+        text-align: center;
+        color: #526775;
+      }
+      input[type='file'] {
+        max-width: 240px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Coco Office</h1>
+      <p>
+        Experimental Word, Excel and PowerPoint editing. Files stay in your browser; export saves a
+        separate copy.
+      </p>
+      <nav aria-label="Documents">
+        <a href="./oojson.html">OOJSON conversion demo</a>
+        <label class="file-label"
+          >Open file <input id="file" type="file" accept=".docx,.xlsx,.pptx"
+        /></label>
+        <button data-sample="docx">Word sample</button>
+        <button data-sample="xlsx">Excel sample</button>
+        <button data-sample="pptx">PowerPoint sample</button>
+        <button id="save" disabled>Export copy</button>
+      </nav>
+      <output id="status" aria-live="polite"
+        >Choose a sample or open your own file. Advanced layout and objects have limited
+        support.</output
+      >
+    </header>
+    <main id="editor"><div id="empty">Your document will appear here.</div></main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
