@@ -27,6 +27,10 @@
     "format:check": "prettier --check ."
   },
   "pnpm": {
+    "overrides": {
+      "bundle-require>esbuild": "0.28.2",
+      "tsup>esbuild": "0.28.2"
+    },
     "onlyBuiltDependencies": [
       "esbuild"
     ]
