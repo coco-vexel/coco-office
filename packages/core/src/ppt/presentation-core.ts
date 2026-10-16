@@ -1066,6 +1066,10 @@ export class ShapeTextApiCore {
     return { ...this.internal().model.text?.style };
   }
 
+  effectiveStyle(): PptTextStyle {
+    return effectiveShapeTextStyle(this.internal());
+  }
+
   body(): PptTextBodyProperties {
     return { ...this.internal().model.text?.body };
   }
@@ -1079,6 +1083,24 @@ export class ShapeTextApiCore {
 
   runs(): PptTextRun[] {
     return this.paragraphs().flatMap((paragraph) => paragraph.runs);
+  }
+
+  effectiveRuns(): PptTextRun[] {
+    const inherited = this.effectiveStyle();
+    return this.paragraphs().flatMap((paragraph) =>
+      paragraph.runs.map((run) => ({
+        ...run,
+        style: {
+          ...inherited,
+          ...(paragraph.style?.alignment ? { alignment: paragraph.style.alignment } : {}),
+          ...(paragraph.style?.lineHeight !== undefined
+            ? { lineHeight: paragraph.style.lineHeight }
+            : {}),
+          ...run.style,
+        },
+        ...(run.hyperlink ? { hyperlink: { ...run.hyperlink } } : {}),
+      })),
+    );
   }
 
   setParagraphs(paragraphs: PptTextParagraphWrite[]): void {
@@ -1331,6 +1353,45 @@ export class ShapeTextApiCore {
   private internal(): PptShapeInternal {
     return getShapeInternal(this.presentation, this.slideId, this.shapeId);
   }
+}
+
+function effectiveShapeTextStyle(shape: PptShapeInternal): PptTextStyle {
+  const layout = shape.slide.model.layout;
+  const master = layout?.master;
+  const placeholder = shape.model.placeholder;
+  const masterDefault = placeholder
+    ? master?.textStyles?.[masterTextStyleKind(placeholder.type)]
+    : master?.textStyles?.other;
+  const masterShape = findMatchingPlaceholderShape(master?.shapes, shape.model);
+  const layoutShape = findMatchingPlaceholderShape(layout?.shapes, shape.model);
+  return {
+    ...masterDefault,
+    ...masterShape?.text?.style,
+    ...layoutShape?.text?.style,
+    ...shape.model.text?.style,
+  };
+}
+
+function masterTextStyleKind(type: string | undefined): 'title' | 'body' | 'other' {
+  if (type === 'title' || type === 'ctrTitle') return 'title';
+  if (type === 'body' || type === 'subTitle' || type === 'obj') return 'body';
+  return 'other';
+}
+
+function findMatchingPlaceholderShape(
+  candidates: readonly PptShapeModel[] | undefined,
+  shape: PptShapeModel,
+): PptShapeModel | undefined {
+  if (!shape.placeholder) return undefined;
+  return candidates?.find((candidate) => {
+    if (!candidate.placeholder) return false;
+    if (shape.placeholder?.index && candidate.placeholder.index === shape.placeholder.index) {
+      return true;
+    }
+    return Boolean(
+      shape.placeholder?.type && candidate.placeholder.type === shape.placeholder.type,
+    );
+  });
 }
 
 export class ShapeChartApiCore {

@@ -39,6 +39,7 @@ const PPT_THUMB_WIDTH_PX = 128;
 const PPT_THUMB_MARGIN_BOTTOM_PX = 8;
 const PPT_THUMB_OVERSCAN = 2;
 const PPT_THUMB_RASTER_SCALE = 2;
+const PPT_THUMB_LAYOUT_SCALE = 4;
 
 type PptTextAlignment = NonNullable<NonNullable<PptSceneNode['textStyle']>['alignment']>;
 type NativePptTextStyle = NonNullable<PptSceneNode['textStyle']> & {
@@ -673,9 +674,11 @@ class NativePptEditorController implements NativePptEditor {
   private renderThumbnailSlide(slide: PptSlideScene): HTMLElement {
     const wrapper = document.createElement('div');
     wrapper.className = 'coco-ppt-thumb-slide';
-    const scale = PPT_THUMB_WIDTH_PX / slide.size.width;
+    const layoutWidth = PPT_THUMB_WIDTH_PX * PPT_THUMB_LAYOUT_SCALE;
+    const scale = layoutWidth / slide.size.width;
     wrapper.style.width = `${slide.size.width * scale}px`;
     wrapper.style.height = `${slide.size.height * scale}px`;
+    wrapper.style.transform = `scale(${1 / PPT_THUMB_LAYOUT_SCALE})`;
     wrapper.style.background = cssBackground(slide.background, this.imageResources);
     wrapper.replaceChildren(
       ...slide.nodes.map((node) => this.renderNode(node, scale, slide, false)),
@@ -698,6 +701,8 @@ class NativePptEditorController implements NativePptEditor {
       PPT_THUMB_WIDTH_PX * (slide.size.height / slide.size.width),
       PPT_THUMB_RASTER_SCALE,
       this.root.querySelector('style')?.textContent ?? '',
+      PPT_THUMB_WIDTH_PX * PPT_THUMB_LAYOUT_SCALE,
+      PPT_THUMB_WIDTH_PX * PPT_THUMB_LAYOUT_SCALE * (slide.size.height / slide.size.width),
     );
     if (!canvas) return;
     if (epoch !== this.thumbnailRasterEpoch || !thumb.isConnected) return;
@@ -1957,17 +1962,19 @@ function prepareTextResizePreview(element: HTMLElement, node: PptSceneNode): voi
   target.style.width = '';
   element.style.whiteSpace = 'pre-wrap';
   element.style.overflowWrap = 'anywhere';
-  element.querySelectorAll<HTMLElement>('.coco-ppt-rich-text, .coco-ppt-paragraph').forEach((item) => {
-    item.style.whiteSpace = 'pre-wrap';
-    item.style.overflowWrap = 'anywhere';
-  });
+  element
+    .querySelectorAll<HTMLElement>('.coco-ppt-rich-text, .coco-ppt-paragraph')
+    .forEach((item) => {
+      item.style.whiteSpace = 'pre-wrap';
+      item.style.overflowWrap = 'anywhere';
+    });
 }
 
 function shouldUseWrappingResizePreview(node: PptSceneNode): boolean {
   return Boolean(
     node.capabilities.editGeometry &&
-      isResizeWrappingTextShape(node) &&
-      (node.text || node.textParagraphs?.length),
+    isResizeWrappingTextShape(node) &&
+    (node.text || node.textParagraphs?.length),
   );
 }
 
@@ -1985,6 +1992,8 @@ async function rasterizeThumbnailElement(
   height: number,
   scale: number,
   cssText: string,
+  layoutWidth = width,
+  layoutHeight = height,
 ): Promise<HTMLCanvasElement | null> {
   if (
     typeof XMLSerializer === 'undefined' ||
@@ -2001,8 +2010,8 @@ async function rasterizeThumbnailElement(
   if (!context) return null;
   const wrapper = document.createElement('div');
   wrapper.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
-  wrapper.style.width = `${width}px`;
-  wrapper.style.height = `${height}px`;
+  wrapper.style.width = `${layoutWidth}px`;
+  wrapper.style.height = `${layoutHeight}px`;
   wrapper.style.position = 'relative';
   wrapper.style.overflow = 'hidden';
   wrapper.style.background = '#fff';
@@ -2013,9 +2022,10 @@ async function rasterizeThumbnailElement(
   clone.style.position = 'relative';
   clone.style.left = '0';
   clone.style.top = '0';
+  clone.style.transform = 'none';
   wrapper.append(style, clone);
   const serialized = new XMLSerializer().serializeToString(wrapper);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${layoutWidth} ${layoutHeight}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
   try {
     const image = await loadRasterImage(url);
@@ -2415,13 +2425,9 @@ function googleFontCssUrl(family: string): string | undefined {
 }
 
 function cssFontFamilyStack(family: string): string {
-  return [
-    cssString(family),
-    '"Calibri"',
-    '"Microsoft YaHei"',
-    '"Segoe UI"',
-    'sans-serif',
-  ].join(', ');
+  return [cssString(family), '"Calibri"', '"Microsoft YaHei"', '"Segoe UI"', 'sans-serif'].join(
+    ', ',
+  );
 }
 
 function cssString(value: string): string {
@@ -2669,7 +2675,8 @@ function shouldWidenLatinDisplayTitle(node: PptSceneNode, scale: number): boolea
   if (!/^[A-Z0-9][A-Z0-9\s&:;,.!?'"()/+-]*$/.test(text)) return false;
   const fontSize = node.textStyle?.fontSize ?? firstTextRunFontSize(node);
   if (!fontSize) return false;
-  const lineHeight = node.textStyle?.lineHeight ?? node.textParagraphs?.[0]?.style?.lineHeight ?? 1.2;
+  const lineHeight =
+    node.textStyle?.lineHeight ?? node.textParagraphs?.[0]?.style?.lineHeight ?? 1.2;
   const lineHeightPx = fontSize * 12700 * scale * lineHeight;
   return node.bounds.height * scale >= lineHeightPx * 1.75;
 }
@@ -2677,10 +2684,9 @@ function shouldWidenLatinDisplayTitle(node: PptSceneNode, scale: number): boolea
 function hasExplicitCharacterSpacing(node: PptSceneNode): boolean {
   return Boolean(
     node.textStyle?.characterSpacing !== undefined ||
-      node.textParagraphs?.some(
-        (paragraph) =>
-          paragraph.runs.some((run) => run.style?.characterSpacing !== undefined),
-      ),
+    node.textParagraphs?.some((paragraph) =>
+      paragraph.runs.some((run) => run.style?.characterSpacing !== undefined),
+    ),
   );
 }
 
@@ -2747,7 +2753,10 @@ function shouldAllowTextOverflow(node: PptSceneNode): boolean {
 
 function hasVisibleFill(node: PptSceneNode): boolean {
   if (node.fillGradient?.colors.length) {
-    return (node.fillGradient.opacities ?? []).some((opacity) => opacity > 0) || !node.fillGradient.opacities;
+    return (
+      (node.fillGradient.opacities ?? []).some((opacity) => opacity > 0) ||
+      !node.fillGradient.opacities
+    );
   }
   return Boolean(node.fillColor && node.opacity !== 0);
 }
@@ -2986,8 +2995,7 @@ function applyTextStyleToElement(
   scale: number,
 ): void {
   if (style.fontSize) element.style.fontSize = `${Math.max(1, style.fontSize * 12700 * scale)}px`;
-  if (style.fontFamily)
-    element.style.fontFamily = cssFontFamilyStack(style.fontFamily);
+  if (style.fontFamily) element.style.fontFamily = cssFontFamilyStack(style.fontFamily);
   if (style.lineHeight) element.style.lineHeight = String(style.lineHeight);
   if (style.characterSpacing !== undefined)
     element.style.letterSpacing = `${style.characterSpacing * 12700 * scale}px`;
@@ -3350,7 +3358,10 @@ function renderPresetGeometry(node: PptSceneNode, scale: number): SVGSVGElement 
   const fillOpacity = effectiveFillOpacity(node);
   if (fillOpacity !== undefined && node.presetGeometry !== 'arc')
     path.setAttribute('fill-opacity', String(fillOpacity));
-  path.setAttribute('stroke', lineGradientId ? `url(#${lineGradientId})` : (node.lineColor ?? 'none'));
+  path.setAttribute(
+    'stroke',
+    lineGradientId ? `url(#${lineGradientId})` : (node.lineColor ?? 'none'),
+  );
   path.setAttribute('stroke-width', String(strokeWidth));
   if (node.lineOpacity !== undefined)
     path.setAttribute('stroke-opacity', String(Math.max(0, Math.min(1, node.lineOpacity))));
@@ -3541,7 +3552,9 @@ function shouldClipCustomGeometryPicture(node: PptSceneNode, slide: PptSlideScen
   return !(coversMostOfSlide && nearSlideOrigin);
 }
 
-function customGeometryIsRectangular(geometry: NonNullable<PptSceneNode['customGeometry']>): boolean {
+function customGeometryIsRectangular(
+  geometry: NonNullable<PptSceneNode['customGeometry']>,
+): boolean {
   if (geometry.paths.length !== 1) return false;
   const path = geometry.paths[0];
   if (!path) return false;
@@ -3565,14 +3578,23 @@ function customGeometryIsRectangular(geometry: NonNullable<PptSceneNode['customG
     { x: 0, y: height },
   ];
   return corners.every((corner) =>
-    unique.some((point) => geometryPointNear(point.x, corner.x) && geometryPointNear(point.y, corner.y)),
+    unique.some(
+      (point) => geometryPointNear(point.x, corner.x) && geometryPointNear(point.y, corner.y),
+    ),
   );
 }
 
-function dedupeGeometryPoints(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+function dedupeGeometryPoints(
+  points: Array<{ x: number; y: number }>,
+): Array<{ x: number; y: number }> {
   const result: Array<{ x: number; y: number }> = [];
   for (const point of points) {
-    if (!result.some((existing) => geometryPointNear(existing.x, point.x) && geometryPointNear(existing.y, point.y))) {
+    if (
+      !result.some(
+        (existing) =>
+          geometryPointNear(existing.x, point.x) && geometryPointNear(existing.y, point.y),
+      )
+    ) {
       result.push(point);
     }
   }
@@ -3597,7 +3619,8 @@ function renderCustomGeometryPicture(node: PptSceneNode, url: string): SVGSVGEle
   for (const path of node.customGeometry?.paths ?? []) {
     const clipShape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     clipShape.setAttribute('d', customGeometryPathData(path.commands));
-    if (customGeometryNeedsEvenOddFill(path.commands)) clipShape.setAttribute('fill-rule', 'evenodd');
+    if (customGeometryNeedsEvenOddFill(path.commands))
+      clipShape.setAttribute('fill-rule', 'evenodd');
     clipPath.append(clipShape);
   }
   defs.append(clipPath);
@@ -3692,7 +3715,10 @@ function renderCustomGeometry(node: PptSceneNode, scale: number): SVGSVGElement 
     const fillOpacity = effectiveFillOpacity(node);
     if (hasFill && fillOpacity !== undefined)
       shape.setAttribute('fill-opacity', String(fillOpacity));
-    shape.setAttribute('stroke', lineGradientId ? `url(#${lineGradientId})` : (node.lineColor ?? 'none'));
+    shape.setAttribute(
+      'stroke',
+      lineGradientId ? `url(#${lineGradientId})` : (node.lineColor ?? 'none'),
+    );
     shape.setAttribute('stroke-width', String(strokeWidth));
     if (node.lineOpacity !== undefined)
       shape.setAttribute('stroke-opacity', String(Math.max(0, Math.min(1, node.lineOpacity))));
@@ -3725,13 +3751,7 @@ function customGeometryEllipse(
   }
   const cx = width / 2;
   const cy = height / 2;
-  const endpoints = [
-    commands[0],
-    commands[1],
-    commands[2],
-    commands[3],
-    commands[4],
-  ];
+  const endpoints = [commands[0], commands[1], commands[2], commands[3], commands[4]];
   const expected = [
     { x: width, y: cy },
     { x: cx, y: height },
@@ -3922,7 +3942,9 @@ function customGeometryPathData(commands: PptCustomGeometryCommand[]): string {
       parts.push(`L ${command.x} ${command.y}`);
       current = { x: command.x, y: command.y };
     } else if (command.kind === 'cubicBezierTo') {
-      parts.push(`C ${command.x1} ${command.y1} ${command.x2} ${command.y2} ${command.x} ${command.y}`);
+      parts.push(
+        `C ${command.x1} ${command.y1} ${command.x2} ${command.y2} ${command.x} ${command.y}`,
+      );
       current = { x: command.x, y: command.y };
     } else if (command.kind === 'arcTo') {
       const arc = svgArcCommandForCustomGeometry(command, current);
@@ -3963,7 +3985,11 @@ function svgArcCommandForCustomGeometry(
   };
 }
 
-function customGeometryArcVector(radiusX: number, radiusY: number, degrees: number): {
+function customGeometryArcVector(
+  radiusX: number,
+  radiusY: number,
+  degrees: number,
+): {
   x: number;
   y: number;
 } {
@@ -4689,7 +4715,9 @@ function isStackedBarGrouping(grouping: string | undefined): boolean {
 
 function shouldOverlayBarSeries(seriesList: PptChartSeriesList): boolean {
   const groups = new Set(seriesList.map((series) => series.chartGroup ?? 0));
-  return groups.size > 1 && seriesList.every((series) => !series.type || series.type.includes('bar'));
+  return (
+    groups.size > 1 && seriesList.every((series) => !series.type || series.type.includes('bar'))
+  );
 }
 
 function chartSeriesBorderWidth(series: PptChartSeries, node?: PptSceneNode): number | undefined {
@@ -4814,7 +4842,15 @@ function renderLineValueLabels(
           ? plot.width / 2
           : (plot.width * pointIndex) / (series.values.length - 1));
       const y = plot.top + plot.height - ((value - min) / Math.max(1, max - min)) * plot.height;
-      appendSvgText(svg, String(value), x, Math.max(plot.top + 2, y - 2.2), 2.6, '#374151', 'middle');
+      appendSvgText(
+        svg,
+        String(value),
+        x,
+        Math.max(plot.top + 2, y - 2.2),
+        2.6,
+        '#374151',
+        'middle',
+      );
     });
   });
 }

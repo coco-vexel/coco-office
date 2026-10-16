@@ -18,7 +18,9 @@ if (await shape.text.hasText()) {
 Use aggregate setters for simple text. They may collapse multi-run text content.
 Use `setTextStyle(...)` for whole-shape text formatting. Use `paragraphs()`,
 `runs()`, `setParagraphs(...)`, and `setRunTextStyle(...)` only when run-level
-formatting matters.
+formatting matters. `style()` and `runs()` expose styles written directly on the
+shape. Use `effectiveStyle()` or `effectiveRuns()` when reading the colors and
+fonts actually visible after slide-layout and slide-master inheritance.
 
 ## Text Handles
 
@@ -41,6 +43,7 @@ for (const shape of await slide.shapes.items()) {
 | `shape.text.getText()`                           | `Promise<string>`                | Aggregated text.                                                                   |
 | `shape.text.paragraphs()`                        | `Promise<PptTextParagraph[]>`    | Paragraph/run structure.                                                           |
 | `shape.text.runs()`                              | `Promise<PptTextRun[]>`          | Flattened text runs, including run hyperlinks.                                     |
+| `shape.text.effectiveRuns()`                     | `Promise<PptTextRun[]>`          | Flattened runs with inherited master, layout, shape, paragraph, and run styles.    |
 | `shape.text.body()`                              | `Promise<PptTextBodyProperties>` | Text body anchor, auto-fit, wrap, vertical mode, and insets.                       |
 | `shape.text.setParagraphs(paragraphs)`           | `Promise<void>`                  | Rebuilds structured paragraphs and runs.                                           |
 | `shape.text.setBodyProperties(body)`             | `Promise<void>`                  | Updates body properties such as auto-fit without rebuilding text.                  |
@@ -50,6 +53,7 @@ for (const shape of await slide.shapes.items()) {
 | `shape.text.setText(text, opts?)`                | `Promise<void>`                  | Writes first run and clears extra text runs.                                       |
 | `shape.text.replace(search, replacement, opts?)` | `Promise<PptTextReplaceResult>`  | One-shape replace.                                                                 |
 | `shape.text.style()`                             | `Promise<PptTextStyle>`          | Font family, size, color, emphasis, alignment, line height, and character spacing. |
+| `shape.text.effectiveStyle()`                    | `Promise<PptTextStyle>`          | Effective shape style after master, layout, and direct-shape inheritance.          |
 | `shape.text.setStyle(style)`                     | `Promise<void>`                  | Compatibility alias for `setTextStyle`.                                            |
 | `shape.text.setBold(enabled)`                    | `Promise<void>`                  | Convenience setter.                                                                |
 | `shape.text.setItalic(enabled)`                  | `Promise<void>`                  | Convenience setter.                                                                |
@@ -127,6 +131,18 @@ for (const paragraph of paragraphs) {
   }
 }
 ```
+
+Read the visible text colors, including layout/master theme inheritance:
+
+```ts
+for (const run of await shape.text.effectiveRuns()) {
+  console.log(run.text, run.style?.color);
+}
+```
+
+Prefer `effectiveRuns()` for color inspection because a run with no explicit
+`color` can still inherit its visible color from a placeholder on the layout or
+from the slide master's title/body/other text style.
 
 Read and write hyperlinks on text runs:
 

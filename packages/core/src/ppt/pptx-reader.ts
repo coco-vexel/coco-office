@@ -264,6 +264,8 @@ function parseSlideMaster(
     const themeRel = Array.from(masterRels.values()).find((item) => item.type === THEME_REL_TYPE);
     if (themeRel) model.theme = parseTheme(pkg, path, themeRel);
     const context = contextFromTheme(model.theme);
+    const textStyles = parseSlideMasterTextStyles(part.xmlDom, context);
+    if (Object.keys(textStyles).length > 0) model.textStyles = textStyles;
     model.background = parseSlideBackground(
       part.xmlDom,
       contextWithRelationships(context, path, masterRels),
@@ -281,6 +283,26 @@ function parseSlideMaster(
     if (masterShapes.length > 0) model.shapes = masterShapes.map((shape) => shape.model);
   }
   return model;
+}
+
+function parseSlideMasterTextStyles(
+  doc: Document,
+  context: PptParseContext,
+): NonNullable<PptSlideMasterModel['textStyles']> {
+  const textStyles = allDescendantsNs(doc, P_NS, 'txStyles')[0];
+  if (!textStyles) return {};
+  const result: NonNullable<PptSlideMasterModel['textStyles']> = {};
+  const entries = [
+    ['title', firstChildNs(textStyles, P_NS, 'titleStyle')],
+    ['body', firstChildNs(textStyles, P_NS, 'bodyStyle')],
+    ['other', firstChildNs(textStyles, P_NS, 'otherStyle')],
+  ] as const;
+  for (const [key, element] of entries) {
+    if (!element) continue;
+    const style = parseTextStyle(element, context);
+    if (Object.keys(style).length > 0) result[key] = style;
+  }
+  return result;
 }
 
 function collectThemes(

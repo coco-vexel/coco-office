@@ -458,6 +458,11 @@ export interface PptSlideMasterModel {
   name?: string;
   background?: PptSlideBackgroundModel;
   shapes?: PptShapeModel[];
+  textStyles?: {
+    title?: PptTextStyle;
+    body?: PptTextStyle;
+    other?: PptTextStyle;
+  };
   theme?: PptThemeModel;
 }
 

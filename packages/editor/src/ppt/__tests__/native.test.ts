@@ -160,9 +160,7 @@ describe('renderNativePptEditor', () => {
     view.scene.slides[0]!.nodes[0]!.textStyle = { fontFamily: 'Cuprum' };
     const editor = renderNativePptEditor(host, view);
 
-    const cuprum = document.getElementById(
-      'coco-ppt-google-font-Cuprum',
-    ) as HTMLLinkElement | null;
+    const cuprum = document.getElementById('coco-ppt-google-font-Cuprum') as HTMLLinkElement | null;
 
     expect(cuprum?.getAttribute('href')).toContain('fonts.googleapis.com');
     expect(cuprum?.getAttribute('href')).toContain('Cuprum');
@@ -406,19 +404,28 @@ describe('renderNativePptEditor', () => {
     await editor.destroy();
   });
 
-  test.each([false, true])('exports pending text edits immediately (already blurred: %s)', async (alreadyBlurred) => {
-    const { editor, root } = await buildEditorHost();
-    try {
-      const node = root.querySelector<HTMLElement>('.coco-ppt-node')!;
-      node.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-      node.textContent = 'Exported immediately';
-      if (alreadyBlurred) node.dispatchEvent(new FocusEvent('blur'));
-      const reloaded = await Presentation.fromZip(await editor.toPptx());
+  test.each([false, true])(
+    'exports pending text edits immediately (already blurred: %s)',
+    async (alreadyBlurred) => {
+      const { editor, root } = await buildEditorHost();
       try {
-        expect(await reloaded.slides.getItem(0).shapes.getItem('Title').text.getText()).toBe('Exported immediately');
-      } finally { await reloaded.dispose(); }
-    } finally { await editor.destroy(); }
-  });
+        const node = root.querySelector<HTMLElement>('.coco-ppt-node')!;
+        node.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+        node.textContent = 'Exported immediately';
+        if (alreadyBlurred) node.dispatchEvent(new FocusEvent('blur'));
+        const reloaded = await Presentation.fromZip(await editor.toPptx());
+        try {
+          expect(await reloaded.slides.getItem(0).shapes.getItem('Title').text.getText()).toBe(
+            'Exported immediately',
+          );
+        } finally {
+          await reloaded.dispose();
+        }
+      } finally {
+        await editor.destroy();
+      }
+    },
+  );
 
   test('commits text edits with Enter and keeps the shape selected', async () => {
     const { editor, root } = await buildEditorHost();
@@ -718,7 +725,9 @@ describe('renderNativePptEditor', () => {
     ];
     const editor = renderNativePptEditor(host, view);
     try {
-      const node = host.shadowRoot!.querySelector<HTMLElement>('.coco-ppt-node[data-kind="table"]')!;
+      const node = host.shadowRoot!.querySelector<HTMLElement>(
+        '.coco-ppt-node[data-kind="table"]',
+      )!;
       const leftCell = host.shadowRoot!.querySelector<HTMLTableCellElement>(
         '.coco-ppt-table td[data-row="0"][data-column="0"]',
       )!;
@@ -1324,6 +1333,11 @@ describe('renderNativePptEditor', () => {
     expect(thumbs[0]!.querySelector('.coco-ppt-thumb-placeholder')?.textContent).toBe('');
     expect(root.querySelector('.coco-ppt-thumb-node[data-shape-id]')).toBeNull();
     expect(root.querySelector('.coco-ppt-thumb .coco-ppt-resize-handle')).toBeNull();
+    const thumbnailSlide = thumbs[0]!.querySelector<HTMLElement>('.coco-ppt-thumb-slide')!;
+    const thumbnailNode = thumbs[0]!.querySelector<HTMLElement>('.coco-ppt-thumb-node')!;
+    expect(thumbnailSlide.style.width).toBe('512px');
+    expect(thumbnailSlide.style.transform).toBe('scale(0.25)');
+    expect(Number.parseFloat(thumbnailNode.style.width)).toBeGreaterThan(100);
 
     thumbs[1]!.click();
     await waitFor(() =>
@@ -1508,7 +1522,10 @@ describe('renderNativePptEditor', () => {
       }
     ).thumbnailCanvasCache;
     for (const slide of editor.session().scene().slides) {
-      cache.set(slide.id, { fingerprint: testThumbnailFingerprint(slide), canvas: document.createElement('canvas') });
+      cache.set(slide.id, {
+        fingerprint: testThumbnailFingerprint(slide),
+        canvas: document.createElement('canvas'),
+      });
     }
 
     await editor.dispatch({
@@ -1595,12 +1612,8 @@ describe('renderNativePptEditor', () => {
 
     expect(firstThumb.dataset.previewMode).toBe('dom');
     expect(movedThumbNode.textContent).toContain('Movable thumbnail');
-    expect(Number.parseFloat(movedThumbNode.style.left)).toBeGreaterThan(
-      (100000 * 128) / 9144000,
-    );
-    expect(Number.parseFloat(movedThumbNode.style.top)).toBeGreaterThan(
-      (100000 * 128) / 9144000,
-    );
+    expect(Number.parseFloat(movedThumbNode.style.left)).toBeGreaterThan((100000 * 128) / 9144000);
+    expect(Number.parseFloat(movedThumbNode.style.top)).toBeGreaterThan((100000 * 128) / 9144000);
     expect(secondThumb.dataset.previewMode).toBe('canvas');
     expect(secondThumb.querySelector('.coco-ppt-thumb-canvas')).not.toBeNull();
     expect(secondThumb.querySelector('.coco-ppt-thumb-slide')).toBeNull();
@@ -2246,7 +2259,9 @@ describe('renderNativePptEditor', () => {
     expect(commitStarted).toBe(true);
     expect(node.style.left).toBe(preview.left);
     expect(node.style.top).toBe(preview.top);
-    expect(root.querySelector<HTMLElement>('.coco-ppt-canvas')!.dataset.interactionMode).toBeUndefined();
+    expect(
+      root.querySelector<HTMLElement>('.coco-ppt-canvas')!.dataset.interactionMode,
+    ).toBeUndefined();
 
     releaseCommit?.();
     await changed;
@@ -2283,7 +2298,9 @@ describe('renderNativePptEditor', () => {
     expect(commitStarted).toBe(true);
     expect(node.style.width).toBe(preview.width);
     expect(node.style.height).toBe(preview.height);
-    expect(root.querySelector<HTMLElement>('.coco-ppt-canvas')!.dataset.interactionMode).toBeUndefined();
+    expect(
+      root.querySelector<HTMLElement>('.coco-ppt-canvas')!.dataset.interactionMode,
+    ).toBeUndefined();
 
     releaseCommit?.();
     await changed;
@@ -2707,13 +2724,17 @@ describe('renderNativePptEditor', () => {
     expect(child.dataset.draggable).toBe('true');
     expect(child.dataset.resizable).toBe('true');
     expect(child.querySelector('.coco-ppt-resize-handle')).not.toBeNull();
-    expect(editor.session().scene().slides[0]!.nodes.find((node) => node.id === '6:15'))
-      .toMatchObject({
-        capabilities: {
-          editGeometry: true,
-          editShapeStyle: false,
-        },
-      });
+    expect(
+      editor
+        .session()
+        .scene()
+        .slides[0]!.nodes.find((node) => node.id === '6:15'),
+    ).toMatchObject({
+      capabilities: {
+        editGeometry: true,
+        editShapeStyle: false,
+      },
+    });
 
     await editor.destroy();
   });
@@ -6475,8 +6496,18 @@ describe('renderNativePptEditor', () => {
                 type: 'bar',
                 data: {
                   series: [
-                    { name: 'A', values: [2654, 965], categories: ['1月', '2月'], showValueLabels: true },
-                    { name: 'B', values: [0, 2365], categories: ['1月', '2月'], showValueLabels: true },
+                    {
+                      name: 'A',
+                      values: [2654, 965],
+                      categories: ['1月', '2月'],
+                      showValueLabels: true,
+                    },
+                    {
+                      name: 'B',
+                      values: [0, 2365],
+                      categories: ['1月', '2月'],
+                      showValueLabels: true,
+                    },
                   ],
                 },
               },
@@ -6849,9 +6880,7 @@ describe('renderNativePptEditor', () => {
     nodeModel.lineWidth = 0;
 
     const editor = renderNativePptEditor(host, view);
-    const node = host.shadowRoot!.querySelector<HTMLElement>(
-      '.coco-ppt-node[data-shape-id="11"]',
-    )!;
+    const node = host.shadowRoot!.querySelector<HTMLElement>('.coco-ppt-node[data-shape-id="11"]')!;
 
     expect(node.style.overflow).toBe('visible');
 
@@ -6891,9 +6920,7 @@ describe('renderNativePptEditor', () => {
     nodeModel.lineWidth = 9525;
 
     const editor = renderNativePptEditor(host, view);
-    const node = host.shadowRoot!.querySelector<HTMLElement>(
-      '.coco-ppt-node[data-shape-id="11"]',
-    )!;
+    const node = host.shadowRoot!.querySelector<HTMLElement>('.coco-ppt-node[data-shape-id="11"]')!;
 
     expect(node.style.overflow).toBe('');
 

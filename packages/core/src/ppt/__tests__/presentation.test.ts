@@ -2612,6 +2612,39 @@ describe('Presentation P0 live-object SDK', () => {
     const reloaded = await Presentation.fromZip(output);
     expect(await advancedShapeModels(reloaded.slides.getItem(0))).toEqual(beforeAdvancedModels);
   });
+
+  it('resolves effective text styles inherited from slide layouts and masters', async () => {
+    const presentation = await Presentation.fromZip(await makeInheritedTextStyleFixturePptx());
+    const title = presentation.slides.getItem(0).shapes.getItem('TitleBox');
+
+    expect((await title.text.style()).color).toBeUndefined();
+    expect(await title.text.effectiveStyle()).toMatchObject({
+      color: '#22AA88',
+      fontSize: 20,
+    });
+    expect(await title.text.effectiveRuns()).toEqual([
+      expect.objectContaining({
+        text: 'Hello ',
+        style: expect.objectContaining({
+          color: '#22AA88',
+          fontSize: 20,
+          bold: true,
+        }),
+      }),
+      expect.objectContaining({
+        text: 'Coco',
+        style: expect.objectContaining({
+          color: '#22AA88',
+          italic: true,
+        }),
+      }),
+    ]);
+
+    const model = await presentation.toModel();
+    expect(model.slides[0]!.layout?.master?.textStyles).toEqual({
+      title: { color: '#3366FF' },
+    });
+  });
 });
 
 describe.skipIf(!process.env.COCO_PPTX_FIXTURE_DIR)('Presentation real PPTX fixtures', () => {
@@ -3083,6 +3116,51 @@ describe.skipIf(!process.env.COCO_PPTX_FIXTURE_DIR)('Presentation real PPTX fixt
     expect(totals.unknownShapes).toBeGreaterThan(0);
   });
 });
+
+async function makeInheritedTextStyleFixturePptx(): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(await makeFixturePptx());
+  const slide = await zip.file('ppt/slides/slide1.xml')!.async('string');
+  zip.file(
+    'ppt/slides/slide1.xml',
+    slide.replace(
+      '<a:rPr sz="2000" b="1"><a:solidFill><a:srgbClr val="112233"/></a:solidFill></a:rPr>',
+      '<a:rPr sz="2000" b="1"/>',
+    ),
+  );
+  zip.file(
+    'ppt/slideLayouts/slideLayout1.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld name="Title and Content">
+    <p:spTree>
+      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+      <p:grpSpPr/>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="2" name="LayoutTitle"/><p:cNvSpPr/><p:nvPr><p:ph type="title" idx="1"/></p:nvPr></p:nvSpPr>
+        <p:spPr/>
+        <p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr><a:solidFill><a:schemeClr val="accent2"/></a:solidFill></a:rPr><a:t>Layout title</a:t></a:r></a:p></p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sldLayout>`,
+  );
+  zip.file(
+    'ppt/slideMasters/slideMaster1.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld name="Office Theme">
+    <p:spTree>
+      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+      <p:grpSpPr/>
+    </p:spTree>
+  </p:cSld>
+  <p:txStyles>
+    <p:titleStyle><a:lvl1pPr><a:defRPr><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></a:defRPr></a:lvl1pPr></p:titleStyle>
+  </p:txStyles>
+</p:sldMaster>`,
+  );
+  return zip.generateAsync({ type: 'uint8array' });
+}
 
 async function makeFixturePptx(): Promise<Uint8Array> {
   const zip = new JSZip();
