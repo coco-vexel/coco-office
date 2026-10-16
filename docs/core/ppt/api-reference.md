@@ -247,6 +247,7 @@ supported sibling edits instead of raw OOXML edits.
 | `shape.text.getText()`                           | `Promise<string>`                | Aggregated shape text.                                              |
 | `shape.text.paragraphs()`                        | `Promise<PptTextParagraph[]>`    | Paragraph/run structure.                                            |
 | `shape.text.runs()`                              | `Promise<PptTextRun[]>`          | Flattened text runs, including run hyperlinks.                      |
+| `shape.text.effectiveRuns()`                     | `Promise<PptTextRun[]>`          | Runs with inherited master, layout, shape, paragraph, and run style. |
 | `shape.text.body()`                              | `Promise<PptTextBodyProperties>` | Text body anchor, auto-fit, wrap, vertical mode, and insets.        |
 | `shape.text.setParagraphs(paragraphs)`           | `Promise<void>`                  | Rebuilds structured paragraphs and runs.                            |
 | `shape.text.setBodyProperties(body)`             | `Promise<void>`                  | Updates body properties such as auto-fit without rebuilding text.   |
@@ -258,6 +259,7 @@ supported sibling edits instead of raw OOXML edits.
 | `shape.text.setText(text, opts?)`                | `Promise<void>`                  | Writes text to first run and clears extra runs.                     |
 | `shape.text.replace(search, replacement, opts?)` | `Promise<PptTextReplaceResult>`  | Replaces inside one shape.                                          |
 | `shape.text.style()`                             | `Promise<PptTextStyle>`          | Font, color, emphasis, baseline, highlight, alignment, and spacing. |
+| `shape.text.effectiveStyle()`                    | `Promise<PptTextStyle>`          | Effective style after master, layout, and direct-shape inheritance. |
 | `shape.text.setStyle(style)`                     | `Promise<void>`                  | Compatibility alias for `setTextStyle`.                             |
 | `shape.text.setBold(enabled)`                    | `Promise<void>`                  | Convenience setter.                                                 |
 | `shape.text.setItalic(enabled)`                  | `Promise<void>`                  | Convenience setter.                                                 |

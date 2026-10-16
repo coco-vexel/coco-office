@@ -557,6 +557,10 @@ export class ShapeTextApi {
     return this.core.style();
   }
 
+  async effectiveStyle(): Promise<PptTextStyle> {
+    return this.core.effectiveStyle();
+  }
+
   async body(): Promise<PptTextBodyProperties> {
     return this.core.body();
   }
@@ -567,6 +571,10 @@ export class ShapeTextApi {
 
   async runs(): Promise<PptTextRun[]> {
     return this.core.runs();
+  }
+
+  async effectiveRuns(): Promise<PptTextRun[]> {
+    return this.core.effectiveRuns();
   }
 
   async setParagraphs(paragraphs: PptTextParagraphWrite[]): Promise<void> {
