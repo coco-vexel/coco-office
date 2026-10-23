@@ -2,6 +2,7 @@ import { createPackage, fromZip, toZip, type Package } from '../pack/index.js';
 import type { ExcelStylesModel, ExcelWorkbookModel } from './model.js';
 import { readWorkbookModel } from './xlsx-reader.js';
 import { createWorkbookPackageFromModel, syncWorkbookModelToPackage } from './xlsx-writer.js';
+import { collectContentOnlyCellPatches, patchWorkbookCellsInPackage } from './xlsx-cell-patcher.js';
 import { ExcelNamedItemCollection } from './names.js';
 import { ExcelWorksheetCollection } from './worksheet.js';
 import { ExcelMutationLog, type ExcelWorkbookMutation } from './mutations.js';
@@ -16,12 +17,14 @@ export class ExcelWorkbookCore {
   readonly names: ExcelNamedItemCollection;
   private readonly pkg: Package;
   private readonly model: ExcelWorkbookModel;
+  private baselineModel: ExcelWorkbookModel;
   private readonly mutationLog = new ExcelMutationLog();
 
   private constructor(init: { workbookId: string; pkg: Package; model: ExcelWorkbookModel }) {
     this.workbookId = init.workbookId;
     this.pkg = init.pkg;
     this.model = init.model;
+    this.baselineModel = structuredCloneModel(init.model);
     this.worksheets = new ExcelWorksheetCollection(init.model.sheets, init.model, (mutation) =>
       this.mutationLog.record(mutation),
     );
@@ -93,8 +96,17 @@ export class ExcelWorkbookCore {
     if (this.pkg.parts.size === 0) {
       return toZip(createWorkbookPackageFromModel(this.model));
     }
+    const cellPatches = collectContentOnlyCellPatches(this.baselineModel, this.model);
+    if (cellPatches) {
+      patchWorkbookCellsInPackage(this.pkg, cellPatches);
+      const bytes = await toZip(this.pkg);
+      this.baselineModel = structuredCloneModel(this.model);
+      return bytes;
+    }
     syncWorkbookModelToPackage(this.pkg, this.model);
-    return toZip(this.pkg);
+    const bytes = await toZip(this.pkg);
+    this.baselineModel = structuredCloneModel(this.model);
+    return bytes;
   }
 }
 
