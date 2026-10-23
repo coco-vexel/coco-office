@@ -76,7 +76,15 @@ export {
   type ContextBlock,
   type ContextBookmark,
 } from './context-search.js';
-export { listRevisions, type RevisionInfo, type ListRevisionsOptions } from './revision-queries.js';
+export {
+  listRevisions,
+  type RevisionInfo,
+  type RevisionKind,
+  type SupportedRevisionLocalName,
+  type SupportedW14RevisionLocalName,
+  type SupportedRevisionType,
+  type ListRevisionsOptions,
+} from './revision-queries.js';
 export {
   listSections,
   type SectionInfo,

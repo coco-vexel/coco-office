@@ -1,51 +1,45 @@
-/**
- * acceptRevisions / rejectRevisions executor —— #32(Phase D 收尾)。
- *
- * 契约(docs/03.1 §3.1):
- *   - 三档 scope:all / paragraph(paraId) / revision(revId)
- *   - Accept `<w:ins>` wrapper:剥 wrapper,保留内容
- *   - Accept `<w:del>` wrapper:剥 wrapper + 删被删内容
- *   - Reject 语义相反
- *   - 段落 mark(`<w:pPr><w:rPr><w:ins/>` / `<w:del/>`)一并处理:
- *     * Accept `ins` mark:删 mark,段保留
- *     * Accept `del` mark:**删整段**(段 mark 的 del 简化为"段要被删")
- *     * Reject `ins` mark:**删整段**
- *     * Reject `del` mark:删 mark,段保留
- *   - `<w:rPrChange>` / `<w:pPrChange>` / `<w:sectPrChange>` 等 Tier 2 属性级修订 →
- *     抛 `UNSUPPORTED_OOXML_FEATURE`
- *
- * **段落 mark 简化说明**:OOXML 规范里段落 mark 的修订对应段落**合并 / 分裂**语义
- * (段 mark ins = 分裂点新增;段 mark del = 与下段合并)。本 PR 的 Tier 1 实现
- * 把"段 mark del accept / 段 mark ins reject"简化为"删整段",不做文本层面的
- * 段落合并。Tier 2 再精细化。
- *
- * 每处理一个 wrapper 或段落 mark 计入 ApplyResult.acceptedRevisions /
- * rejectedRevisions 一次。
- */
+/** Accept/reject semantics for the WordprocessingML revision model. */
 import { getPart, isXmlPart, listParts, markDirty } from '../../pack/index.js';
-import { W_NS } from '../namespaces.js';
+import { W14_NS, W_NS } from '../namespaces.js';
 import type { Op } from '../plan.js';
-import { assertNoTier2Revisions } from '../revision-queries.js';
+import {
+  REVISION_RANGE_MARKER_NAMES,
+  W14_REVISION_RANGE_MARKER_NAMES,
+  assertNoUnsupportedRevisions,
+  collectSupportedRevisionElements,
+  type SupportedRevisionType,
+} from '../revision-queries.js';
 import { findStoryFor } from '../stories.js';
 import { WordError } from '../word-error.js';
 import type { ExecutorContext } from './executor-context.js';
 
 type Action = 'accept' | 'reject';
-type RevisionKind = 'ins' | 'del';
+type RevisionScope = Extract<Op, { type: 'acceptRevisions' }>['scope'];
 
 interface RevisionTarget {
   el: Element;
-  kind: RevisionKind;
-  /** true 表示此 ins/del 是段落 mark(位于 pPr/rPr 下) */
-  isParaMark: boolean;
-  /** 段落 mark 对应的 `<w:p>` 元素(isParaMark=false 时也可能用到,作为 containing paragraph) */
-  paragraph: Element | null;
+  type: SupportedRevisionType;
 }
 
-// Tier 2 属性级修订拒绝:用共享的 `assertNoTier2Revisions`(revision-queries.ts),
-// 读 listRevisions + 写 accept/reject 共用同一名单(#33)。
+const PROPERTY_CHANGE_NAMES = new Set<SupportedRevisionType>([
+  'rPrChange',
+  'pPrChange',
+  'sectPrChange',
+  'tblPrChange',
+  'trPrChange',
+  'tcPrChange',
+  'tblPrExChange',
+  'tblGridChange',
+]);
 
-// ─────────── entry ───────────
+const CUSTOM_RANGE_END: Partial<Record<SupportedRevisionType, string>> = {
+  customXmlInsRangeStart: 'customXmlInsRangeEnd',
+  customXmlDelRangeStart: 'customXmlDelRangeEnd',
+  customXmlMoveFromRangeStart: 'customXmlMoveFromRangeEnd',
+  customXmlMoveToRangeStart: 'customXmlMoveToRangeEnd',
+  customXmlConflictInsRangeStart: 'customXmlConflictInsRangeEnd',
+  customXmlConflictDelRangeStart: 'customXmlConflictDelRangeEnd',
+};
 
 export function executeAcceptRevisions(
   ctx: ExecutorContext,
@@ -61,54 +55,34 @@ export function executeRejectRevisions(
   processRevisions(ctx, op.scope, 'reject');
 }
 
-function processRevisions(
-  ctx: ExecutorContext,
-  scope: Extract<Op, { type: 'acceptRevisions' }>['scope'],
-  action: Action,
-): void {
-  // 1. 收集 targets(根据 scope);同时扫 Tier 2 属性修订抛 UNSUPPORTED
-  const targets = collectTargets(ctx, scope);
-
-  // 2. 逐个处理;paragraph mark 要删整段的分支,**把对应 <w:p> 收集到批量删除队列**,
-  //    避免同一段上多个 ins/del 导致多次尝试 removeChild
-  const paragraphsToDelete = new Set<Element>();
+function processRevisions(ctx: ExecutorContext, scope: RevisionScope, action: Action): void {
+  const targets = collectTargets(ctx, scope, action);
   const markedParts = new Set<string>();
-  const addDirty = (el: Element): void => {
-    const story = findStoryFor(ctx.pkg, el);
+  for (const target of targets) {
+    const story = findStoryFor(ctx.pkg, target.el);
     if (story) markedParts.add(story.partPath);
-  };
+  }
 
-  for (const t of targets) {
-    // 先 markDirty(基于处理前 t.el 仍挂在 DOM 上的 parent chain),再应用变更 ——
-    // applyWrapper 会 removeChild 导致 t.el.parentNode 变 null,太晚查不到 story
-    if (t.paragraph) addDirty(t.paragraph);
-    applyToTarget(t, action, paragraphsToDelete, addDirty);
+  // Descendants first: replacing a property container or deleting a row must not strand
+  // independently tracked nested changes that were present in the original document.
+  for (const target of [...targets].reverse()) {
+    applyTarget(target, action, ctx.docId);
     if (action === 'accept') ctx.result.acceptedRevisions++;
     else ctx.result.rejectedRevisions++;
   }
 
-  // 3. 统一删除段落(去重后)
-  for (const p of paragraphsToDelete) {
-    addDirty(p);
-    p.parentNode?.removeChild(p);
-  }
-
-  // 4. markDirty 所有触达的 parts
+  if (scope.scope === 'all') removeOrphanRangeMarkers(ctx);
   for (const partPath of markedParts) {
     const part = getPart(ctx.pkg, partPath);
     if (part) markDirty(part);
   }
 }
 
-// ─────────── target 收集 ───────────
-
 function collectTargets(
   ctx: ExecutorContext,
-  scope: Extract<Op, { type: 'acceptRevisions' }>['scope'],
+  scope: RevisionScope,
+  action: Action,
 ): RevisionTarget[] {
-  if (scope.scope === 'all') {
-    return collectFromPkg(ctx);
-  }
   if (scope.scope === 'paragraph') {
     const p = ctx.indices.paraIdx.get(scope.paraId.toUpperCase());
     if (!p) {
@@ -116,198 +90,446 @@ function collectTargets(
         'PARA_NOT_FOUND',
         `paragraph with paraId='${scope.paraId}' not found`,
         ctx.docId,
-        { paraId: scope.paraId, opName: 'accept/rejectRevisions' },
+        {
+          paraId: scope.paraId,
+          opName: `${action}Revisions`,
+        },
       );
     }
-    return collectFromSubtree(ctx, p);
+    return collectFromRoot(p, ctx.docId, action);
   }
-  // scope === 'revision'
-  const all = collectFromPkg(ctx);
-  const matched = all.filter((t) => {
-    const id = t.el.getAttributeNS(W_NS, 'id') ?? t.el.getAttribute('w:id');
-    return id === scope.revId;
-  });
+
+  const all: RevisionTarget[] = [];
+  for (const part of listParts(ctx.pkg)) {
+    if (!isXmlPart(part) || !part.xmlDom) continue;
+    all.push(...collectFromRoot(part.xmlDom as Document, ctx.docId, action));
+  }
+  if (scope.scope === 'all') return all;
+
+  const matched = all.filter((target) => revisionId(target.el) === scope.revId);
   if (matched.length === 0) {
     throw new WordError(
       'REVISION_NOT_FOUND',
       `revision with revId='${scope.revId}' not found`,
       ctx.docId,
-      { revId: scope.revId, opName: 'accept/rejectRevisions' },
+      {
+        revId: scope.revId,
+        opName: `${action}Revisions`,
+      },
     );
   }
   return matched;
 }
 
-function collectFromPkg(ctx: ExecutorContext): RevisionTarget[] {
-  const out: RevisionTarget[] = [];
-  for (const part of listParts(ctx.pkg)) {
-    if (!isXmlPart(part) || !part.xmlDom) continue;
-    const doc = part.xmlDom as Document;
-    assertNoTier2Revisions(doc, ctx.docId, 'acceptRevisions');
-    collectInsDelFromRoot(doc, out);
-  }
-  return out;
+function collectFromRoot(
+  root: Document | Element,
+  docId: string,
+  action: Action,
+): RevisionTarget[] {
+  assertNoUnsupportedRevisions(
+    root,
+    docId,
+    action === 'accept' ? 'acceptRevisions' : 'rejectRevisions',
+  );
+  return collectSupportedRevisionElements(root).map((el) => ({
+    el,
+    type: el.localName as SupportedRevisionType,
+  }));
 }
 
-function collectFromSubtree(ctx: ExecutorContext, root: Element): RevisionTarget[] {
-  assertNoTier2Revisions(root, ctx.docId, 'acceptRevisions');
-  const out: RevisionTarget[] = [];
-  collectInsDelFromRoot(root, out);
-  return out;
+function applyTarget(target: RevisionTarget, action: Action, docId: string): void {
+  const { el, type } = target;
+  if (!el.parentNode) return;
+
+  if (PROPERTY_CHANGE_NAMES.has(type)) {
+    applyPropertyChange(el, action);
+    return;
+  }
+  if (type === 'numberingChange') {
+    remove(el);
+    return;
+  }
+  if (type === 'cellIns' || type === 'cellDel') {
+    applyCellInsertionDeletion(el, type, action);
+    return;
+  }
+  if (type === 'cellMerge') {
+    applyCellMerge(el, action);
+    return;
+  }
+  if (CUSTOM_RANGE_END[type]) {
+    applyCustomXmlRange(el, type, action, docId);
+    return;
+  }
+  if (type === 'ins' || type === 'del') {
+    applyInsertionDeletion(el, type, action);
+    return;
+  }
+  if (type === 'moveFrom' || type === 'moveTo') {
+    applyMove(el, type, action);
+    return;
+  }
+  if (type === 'conflictIns' || type === 'conflictDel') {
+    applyConflictRevision(el, type, action);
+  }
 }
 
-function collectInsDelFromRoot(root: Document | Element, out: RevisionTarget[]): void {
-  const insEls = root.getElementsByTagNameNS(W_NS, 'ins');
-  const delEls = root.getElementsByTagNameNS(W_NS, 'del');
-  for (let i = 0; i < insEls.length; i++) {
-    const el = insEls[i];
-    if (!el) continue;
-    out.push(buildTarget(el, 'ins'));
+function applyPropertyChange(change: Element, action: Action): void {
+  const current = change.parentNode;
+  if (!current || current.nodeType !== 1) return;
+  if (action === 'accept') {
+    current.removeChild(change);
+    return;
   }
-  for (let i = 0; i < delEls.length; i++) {
-    const el = delEls[i];
-    if (!el) continue;
-    out.push(buildTarget(el, 'del'));
+
+  const currentEl = current as Element;
+  const expectedSnapshotName = currentEl.localName;
+  const snapshot = directChild(change, expectedSnapshotName);
+  const replacement = snapshot
+    ? (snapshot.cloneNode(true) as Element)
+    : currentEl.ownerDocument!.createElementNS(W_NS, `w:${expectedSnapshotName}`);
+
+  // pPrChange snapshots do not carry the paragraph-mark rPr; it is orthogonal to pPr history.
+  if (expectedSnapshotName === 'pPr') {
+    const currentMarkRPr = directChild(currentEl, 'rPr');
+    if (currentMarkRPr && !directChild(replacement, 'rPr')) {
+      replacement.appendChild(currentMarkRPr.cloneNode(true));
+    }
   }
+  currentEl.parentNode?.replaceChild(replacement, currentEl);
 }
 
-function buildTarget(el: Element, kind: RevisionKind): RevisionTarget {
-  const parent = el.parentNode;
-  // 段落 mark 检测:parent 是 rPr,rPr 的 parent 是 pPr,pPr 的 parent 是 w:p
-  let isParaMark = false;
-  let paragraph: Element | null = null;
+function applyInsertionDeletion(el: Element, type: 'ins' | 'del', action: Action): void {
+  const row = paragraphOrRowMarkOwner(el, 'tr');
+  if (row) {
+    const deleteRow =
+      (type === 'ins' && action === 'reject') || (type === 'del' && action === 'accept');
+    if (deleteRow) row.parentNode?.removeChild(row);
+    else remove(el);
+    return;
+  }
+
+  const paragraph = paragraphOrRowMarkOwner(el, 'p');
+  if (paragraph) {
+    const merge =
+      (type === 'ins' && action === 'reject') || (type === 'del' && action === 'accept');
+    if (merge) mergeParagraphWithNext(paragraph);
+    else remove(el);
+    return;
+  }
+
+  const keep = (type === 'ins' && action === 'accept') || (type === 'del' && action === 'reject');
+  if (keep) unwrap(el, type === 'del');
+  else remove(el);
+}
+
+function applyMove(el: Element, type: 'moveFrom' | 'moveTo', action: Action): void {
+  const keep =
+    (type === 'moveFrom' && action === 'reject') || (type === 'moveTo' && action === 'accept');
+  const name = el.getAttributeNS(W_NS, 'name');
+  const root = el.ownerDocument;
+  if (keep) unwrap(el, type === 'moveFrom');
+  else remove(el);
+  removeMoveRangeMarkers(root, type, name);
+}
+
+function applyConflictRevision(
+  el: Element,
+  type: 'conflictIns' | 'conflictDel',
+  action: Action,
+): void {
+  const keep =
+    (type === 'conflictIns' && action === 'accept') ||
+    (type === 'conflictDel' && action === 'reject');
+  if (el.childNodes.length > 0) {
+    if (keep) unwrap(el, type === 'conflictDel');
+    else remove(el);
+    return;
+  }
+  if (keep) {
+    remove(el);
+    return;
+  }
+  const owner =
+    paragraphOrRowMarkOwner(el, 'p') ??
+    paragraphOrRowMarkOwner(el, 'tr') ??
+    nearestAncestor(el, 'r') ??
+    nearestAncestor(el, 'tc') ??
+    nearestAncestor(el, 'tr') ??
+    nearestAncestor(el, 'p');
+  if (owner) owner.parentNode?.removeChild(owner);
+  else remove(el);
+}
+
+function applyCellInsertionDeletion(
+  marker: Element,
+  type: 'cellIns' | 'cellDel',
+  action: Action,
+): void {
+  const cell = nearestAncestor(marker, 'tc');
+  const deleteCell =
+    (type === 'cellIns' && action === 'reject') || (type === 'cellDel' && action === 'accept');
+  if (deleteCell && cell) cell.parentNode?.removeChild(cell);
+  else remove(marker);
+}
+
+function applyCellMerge(marker: Element, action: Action): void {
+  if (action === 'reject') {
+    remove(marker);
+    return;
+  }
+  const parent = marker.parentNode;
+  if (!parent) return;
+  const raw = marker.getAttributeNS(W_NS, 'vMerge');
+  if (raw !== 'rest' && raw !== 'cont') {
+    remove(marker);
+    return;
+  }
+  const vMerge = marker.ownerDocument!.createElementNS(W_NS, 'w:vMerge');
+  vMerge.setAttributeNS(W_NS, 'w:val', raw === 'rest' ? 'restart' : 'continue');
+  parent.replaceChild(vMerge, marker);
+}
+
+function applyCustomXmlRange(
+  start: Element,
+  type: SupportedRevisionType,
+  action: Action,
+  docId: string,
+): void {
+  const endName = CUSTOM_RANGE_END[type]!;
+  const id = revisionId(start);
+  const end = findRangeEnd(start.ownerDocument!, start.namespaceURI!, endName, id);
+  if (!end) {
+    throw new WordError('UNSUPPORTED_OOXML_FEATURE', `Unpaired <w:${type}> revision range`, docId, {
+      revisionKind: type,
+      revId: id,
+    });
+  }
+  const keep =
+    (type === 'customXmlInsRangeStart' && action === 'accept') ||
+    (type === 'customXmlDelRangeStart' && action === 'reject') ||
+    (type === 'customXmlMoveFromRangeStart' && action === 'reject') ||
+    (type === 'customXmlMoveToRangeStart' && action === 'accept') ||
+    (type === 'customXmlConflictInsRangeStart' && action === 'accept') ||
+    (type === 'customXmlConflictDelRangeStart' && action === 'reject');
+  if (keep) {
+    if (
+      type === 'customXmlDelRangeStart' ||
+      type === 'customXmlMoveFromRangeStart' ||
+      type === 'customXmlConflictDelRangeStart'
+    ) {
+      for (const node of nodesBetween(start, end)) {
+        if (node.nodeType === 1) convertDelTextToT(node as Element);
+      }
+    }
+    remove(start);
+    remove(end);
+    return;
+  }
+
+  deleteRangeContents(start, end);
+  remove(start);
+  remove(end);
+}
+
+function paragraphOrRowMarkOwner(el: Element, ownerName: 'p' | 'tr'): Element | null {
+  let parent = el.parentNode;
+  if (!parent || parent.nodeType !== 1) return null;
   if (
-    parent &&
-    parent.nodeType === 1 &&
+    ownerName === 'p' &&
     (parent as Element).namespaceURI === W_NS &&
     (parent as Element).localName === 'rPr'
   ) {
-    const pPr = parent.parentNode;
-    if (
-      pPr &&
-      pPr.nodeType === 1 &&
-      (pPr as Element).namespaceURI === W_NS &&
-      (pPr as Element).localName === 'pPr'
-    ) {
-      const p = pPr.parentNode;
-      if (
-        p &&
-        p.nodeType === 1 &&
-        (p as Element).namespaceURI === W_NS &&
-        (p as Element).localName === 'p'
-      ) {
-        isParaMark = true;
-        paragraph = p as Element;
-      }
-    }
+    parent = parent.parentNode;
   }
-  if (!isParaMark) {
-    paragraph = findContainingParagraph(el);
+  const propertyName = ownerName === 'p' ? 'pPr' : 'trPr';
+  if (
+    !parent ||
+    parent.nodeType !== 1 ||
+    (parent as Element).namespaceURI !== W_NS ||
+    (parent as Element).localName !== propertyName
+  ) {
+    return null;
   }
-  return { el, kind, isParaMark, paragraph };
+  const owner = parent.parentNode;
+  return owner &&
+    owner.nodeType === 1 &&
+    (owner as Element).namespaceURI === W_NS &&
+    (owner as Element).localName === ownerName
+    ? (owner as Element)
+    : null;
 }
 
-function findContainingParagraph(el: Element): Element | null {
-  let cur: Node | null = el.parentNode;
-  while (cur && cur.nodeType === 1) {
-    const e = cur as Element;
-    if (e.namespaceURI === W_NS && e.localName === 'p') return e;
-    cur = cur.parentNode;
+function mergeParagraphWithNext(paragraph: Element): void {
+  removeRevisionMarksFromParagraphProperties(paragraph);
+  let next = paragraph.nextSibling;
+  while (next && (next.nodeType !== 1 || (next as Element).localName !== 'p'))
+    next = next.nextSibling;
+  if (!next || (next as Element).namespaceURI !== W_NS) return;
+  const nextParagraph = next as Element;
+  for (const child of Array.from(nextParagraph.childNodes)) {
+    if (
+      child.nodeType === 1 &&
+      (child as Element).namespaceURI === W_NS &&
+      (child as Element).localName === 'pPr'
+    ) {
+      continue;
+    }
+    paragraph.appendChild(child);
+  }
+  nextParagraph.parentNode?.removeChild(nextParagraph);
+}
+
+function removeRevisionMarksFromParagraphProperties(paragraph: Element): void {
+  for (const name of ['ins', 'del']) {
+    const nodes = Array.from(paragraph.getElementsByTagNameNS(W_NS, name));
+    for (const node of nodes) {
+      if (paragraphOrRowMarkOwner(node, 'p') === paragraph) remove(node);
+    }
+  }
+}
+
+function unwrap(el: Element, restoreDeletedText: boolean): void {
+  const parent = el.parentNode;
+  if (!parent) return;
+  const children = Array.from(el.childNodes);
+  if (restoreDeletedText) {
+    for (const child of children) if (child.nodeType === 1) convertDelTextToT(child as Element);
+  }
+  for (const child of children) parent.insertBefore(child, el);
+  parent.removeChild(el);
+}
+
+function convertDelTextToT(root: Element): void {
+  const nodes = Array.from(root.getElementsByTagNameNS(W_NS, 'delText'));
+  if (root.namespaceURI === W_NS && root.localName === 'delText') nodes.unshift(root);
+  for (const delText of nodes) {
+    if (!delText.parentNode) continue;
+    const t = delText.ownerDocument!.createElementNS(W_NS, 'w:t');
+    for (let i = 0; i < delText.attributes.length; i++) {
+      const attr = delText.attributes[i];
+      if (!attr) continue;
+      if (attr.namespaceURI) t.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+      else t.setAttribute(attr.name, attr.value);
+    }
+    t.textContent = delText.textContent;
+    delText.parentNode.replaceChild(t, delText);
+  }
+}
+
+function removeMoveRangeMarkers(
+  root: Document,
+  type: 'moveFrom' | 'moveTo',
+  name: string | null,
+): void {
+  if (name === null) return;
+  const names =
+    type === 'moveFrom'
+      ? ['moveFromRangeStart', 'moveFromRangeEnd']
+      : ['moveToRangeStart', 'moveToRangeEnd'];
+  for (const local of names) {
+    const markers = Array.from(root.getElementsByTagNameNS(W_NS, local));
+    for (const marker of markers) {
+      if (marker.getAttributeNS(W_NS, 'name') === name) remove(marker);
+    }
+  }
+}
+
+function removeOrphanRangeMarkers(ctx: ExecutorContext): void {
+  for (const part of listParts(ctx.pkg)) {
+    if (!isXmlPart(part) || !part.xmlDom) continue;
+    for (const local of REVISION_RANGE_MARKER_NAMES) {
+      for (const marker of Array.from(part.xmlDom.getElementsByTagNameNS(W_NS, local)))
+        remove(marker);
+    }
+    for (const local of W14_REVISION_RANGE_MARKER_NAMES) {
+      for (const marker of Array.from(part.xmlDom.getElementsByTagNameNS(W14_NS, local)))
+        remove(marker);
+    }
+  }
+}
+
+function findRangeEnd(
+  root: Document,
+  namespace: string,
+  localName: string,
+  id: string | null,
+): Element | null {
+  const ends = root.getElementsByTagNameNS(namespace, localName);
+  for (let i = 0; i < ends.length; i++) {
+    const end = ends[i];
+    if (end && revisionId(end) === id) return end;
   }
   return null;
 }
 
-// assertNoPropertyRevisions 已在 #33 提到 revision-queries.ts,更名为 assertNoTier2Revisions
-// 以读 / 写路径共用
-
-// ─────────── 单 target 应用 ───────────
-
-function applyToTarget(
-  t: RevisionTarget,
-  action: Action,
-  paragraphsToDelete: Set<Element>,
-  _addDirty: (el: Element) => void,
-): void {
-  if (t.isParaMark) {
-    applyParaMark(t, action, paragraphsToDelete);
-    return;
-  }
-  // 正文 wrapper(markDirty 已在上层循环基于 t.paragraph 做完)
-  applyWrapper(t, action);
+function nodesBetween(start: Node, end: Node): Node[] {
+  const all = flattenNodes(start.ownerDocument!);
+  const from = all.indexOf(start);
+  const to = all.indexOf(end);
+  return from >= 0 && to > from ? all.slice(from + 1, to) : [];
 }
 
-/** 段落 mark 处理 */
-function applyParaMark(t: RevisionTarget, action: Action, paragraphsToDelete: Set<Element>): void {
-  const p = t.paragraph!;
-  const shouldDeleteParagraph =
-    (t.kind === 'ins' && action === 'reject') || (t.kind === 'del' && action === 'accept');
-  if (shouldDeleteParagraph) {
-    paragraphsToDelete.add(p);
-  } else {
-    // 仅删 ins/del mark 标记,段保留
-    t.el.parentNode?.removeChild(t.el);
+function deleteRangeContents(start: Node, end: Node): void {
+  const candidates = new Set(nodesBetween(start, end));
+  for (const node of [...candidates]) {
+    if (isAncestor(node, end)) candidates.delete(node);
+  }
+  for (const node of candidates) {
+    if (node.parentNode && !candidates.has(node.parentNode)) node.parentNode.removeChild(node);
   }
 }
 
-/** 正文 wrapper(`<w:ins>` / `<w:del>` 直接包裹 runs)处理 */
-function applyWrapper(t: RevisionTarget, action: Action): void {
-  const el = t.el;
-  const parent = el.parentNode;
-  if (!parent) return;
-
-  const keepContent =
-    (t.kind === 'ins' && action === 'accept') || (t.kind === 'del' && action === 'reject');
-
-  if (keepContent) {
-    // 剥 wrapper,把内部 children 移到 wrapper 原位
-    // del wrapper 的 reject:内部 <w:delText> 要转回 <w:t>
-    const children = Array.from(el.childNodes);
-    if (t.kind === 'del' && action === 'reject') {
-      for (const c of children) {
-        if (c.nodeType === 1) convertDelTextToT(c as Element);
-      }
+function flattenNodes(root: Node): Node[] {
+  const out: Node[] = [];
+  const visit = (node: Node): void => {
+    out.push(node);
+    for (let i = 0; i < node.childNodes.length; i++) {
+      const child = node.childNodes[i];
+      if (child) visit(child);
     }
-    for (const c of children) {
-      parent.insertBefore(c, el);
-    }
-    parent.removeChild(el);
-  } else {
-    // 整个 wrapper 连带内容一起删
-    parent.removeChild(el);
-  }
+  };
+  visit(root);
+  return out;
 }
 
-/** 递归把 `<w:delText>` 转回 `<w:t>`(reject del 用);属性搬 xml:space */
-function convertDelTextToT(el: Element): void {
-  // 先递归处理子孙(深度优先,避免枚举中修改)
-  const snapshot: Node[] = [];
-  for (let i = 0; i < el.childNodes.length; i++) {
-    const c = el.childNodes[i];
-    if (c) snapshot.push(c);
+function isAncestor(candidate: Node, node: Node): boolean {
+  let current: Node | null = node.parentNode;
+  while (current) {
+    if (current === candidate) return true;
+    current = current.parentNode;
   }
-  for (const child of snapshot) {
+  return false;
+}
+
+function revisionId(el: Element): string | null {
+  return el.getAttributeNS(W_NS, 'id') ?? el.getAttribute('w:id');
+}
+
+function directChild(parent: Element, localName: string): Element | null {
+  for (let i = 0; i < parent.childNodes.length; i++) {
+    const child = parent.childNodes[i];
     if (
-      child.nodeType === 1 &&
+      child?.nodeType === 1 &&
       (child as Element).namespaceURI === W_NS &&
-      (child as Element).localName === 'delText'
+      (child as Element).localName === localName
     ) {
-      const delText = child as Element;
-      const doc = delText.ownerDocument!;
-      const t = doc.createElementNS(W_NS, 'w:t');
-      // 搬属性(主要是 xml:space="preserve")
-      for (let i = 0; i < delText.attributes.length; i++) {
-        const attr = delText.attributes[i];
-        if (!attr) continue;
-        if (attr.namespaceURI) {
-          t.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
-        } else {
-          t.setAttribute(attr.name, attr.value);
-        }
-      }
-      t.textContent = delText.textContent;
-      el.replaceChild(t, delText);
-    } else if (child.nodeType === 1) {
-      convertDelTextToT(child as Element);
+      return child as Element;
     }
   }
+  return null;
+}
+
+function nearestAncestor(el: Element, localName: string): Element | null {
+  let current: Node | null = el.parentNode;
+  while (current && current.nodeType === 1) {
+    const ancestor = current as Element;
+    if (ancestor.namespaceURI === W_NS && ancestor.localName === localName) return ancestor;
+    current = ancestor.parentNode;
+  }
+  return null;
+}
+
+function remove(el: Element): void {
+  el.parentNode?.removeChild(el);
 }

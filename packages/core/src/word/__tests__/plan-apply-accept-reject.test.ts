@@ -131,19 +131,22 @@ describe('acceptRevisions / rejectRevisions e2e —— inline', () => {
     await doc.dispose();
   });
 
-  test('段落 mark reject ins → 整段被删', async () => {
+  test('段落 mark reject ins → 撤销分段并合并下一段', async () => {
     const buf = await makeFixture(
       `<w:p w14:paraId="AAAAAAA1"><w:r><w:t>keep</w:t></w:r></w:p>
       <w:p w14:paraId="AAAAAAA2">
         <w:pPr><w:rPr><w:ins w:id="1" w:author="x" w:date="2026-04-23T00:00:00Z"/></w:rPr></w:pPr>
         <w:r><w:t>dropMe</w:t></w:r>
-      </w:p>`,
+      </w:p><w:p w14:paraId="AAAAAAA3"><w:r><w:t>tail</w:t></w:r></w:p>`,
     );
     const doc = await WordDocument.fromZip(buf, { docId: 'ar-para-mark', mode: 'inline' });
     await doc.plan().rejectRevisions({ scope: 'all' }).apply();
 
     const list = await doc.paragraphs.list({ pagination: { mode: 'all' } });
-    expect(await Promise.all(list.paragraphs.map((p) => p.getText()))).toEqual(['keep']);
+    expect(await Promise.all(list.paragraphs.map((p) => p.getText()))).toEqual([
+      'keep',
+      'dropMetail',
+    ]);
     await doc.dispose();
   });
 
@@ -183,7 +186,10 @@ describe('acceptRevisions / rejectRevisions e2e —— inline', () => {
 
 describe('acceptRevisions / rejectRevisions e2e —— worker', () => {
   beforeAll(() => {
-    execSync('corepack pnpm --filter @coco-vexel/coco-office build', { cwd: rootDir, stdio: 'pipe' });
+    execSync('corepack pnpm --filter @coco-vexel/coco-office build', {
+      cwd: rootDir,
+      stdio: 'pipe',
+    });
     WordDocument.setWorkerBundleUrl(bundleUrl);
   }, 120_000);
 

@@ -5,13 +5,19 @@
  *   - Accept / Reject × <w:ins> / <w:del> wrapper × 正文(段内)场景
  *   - Accept / Reject × 段落 mark(pPr/rPr/<w:ins>|del>)场景
  *   - 三档 scope:all / paragraph / revision
- *   - Tier 2 属性修订(rPrChange / pPrChange 等)抛 UNSUPPORTED_OOXML_FEATURE
+ *   - 属性、移动、表格结构与 custom XML range 修订
  *   - PARA_NOT_FOUND / REVISION_NOT_FOUND
  *   - ApplyResult.acceptedRevisions / rejectedRevisions 计数
  */
 import { describe, expect, test } from 'vitest';
 import { parseXmlDocument, serializeToWellFormedString } from 'slimdom';
-import { createPackage, createXmlPart, setPart, type Package } from '../../../pack/index.js';
+import {
+  createPackage,
+  createXmlPart,
+  getPart,
+  setPart,
+  type Package,
+} from '../../../pack/index.js';
 import { buildIndices } from '../../indices.js';
 import { W_NS, W14_NS } from '../../namespaces.js';
 import type { ApplyResult, Op } from '../../plan.js';
@@ -74,6 +80,11 @@ function paraXml(pkg: Package, paraId: string): string {
 function paraCount(pkg: Package): number {
   const idx = buildIndices(pkg);
   return idx.paraIdx.size;
+}
+
+function documentXml(pkg: Package): string {
+  const part = getPart(pkg, 'word/document.xml')!;
+  return serializeToWellFormedString(part.xmlDom as never);
 }
 
 function acceptOp(
@@ -186,24 +197,26 @@ describe('段落 mark —— pPr/rPr/<w:ins>', () => {
     expect(ctx.result.acceptedRevisions).toBe(1);
   });
 
-  test('reject ins mark:删整段', () => {
+  test('reject ins mark:撤销新增段落标记并与下一段合并', () => {
     const { pkg, ctx } = makeDoc(
       `<w:p w14:paraId="AAAAAAA1"><w:r><w:t>keep</w:t></w:r></w:p>
        <w:p w14:paraId="AAAAAAA2">
         <w:pPr><w:rPr><w:ins w:id="1" w:author="x" w:date="2026-04-23T00:00:00Z"/></w:rPr></w:pPr>
         <w:r><w:t>toDelete</w:t></w:r>
-      </w:p>`,
+      </w:p><w:p w14:paraId="AAAAAAA3"><w:r><w:t>tail</w:t></w:r></w:p>`,
     );
     executeRejectRevisions(ctx, rejectOp({ scope: 'all' }));
-    expect(paraCount(pkg)).toBe(1);
+    expect(paraCount(pkg)).toBe(2);
     const idx = buildIndices(pkg);
-    expect(idx.paraIdx.has('AAAAAAA2')).toBe(false);
+    expect(idx.paraIdx.has('AAAAAAA2')).toBe(true);
+    expect(idx.paraIdx.has('AAAAAAA3')).toBe(false);
+    expect(paraXml(pkg, 'AAAAAAA2')).toMatch(/toDelete[\s\S]*tail/);
     expect(ctx.result.rejectedRevisions).toBe(1);
   });
 });
 
 describe('段落 mark —— pPr/rPr/<w:del>', () => {
-  test('accept del mark:删整段(段合并简化为删)', () => {
+  test('accept del mark:接受段落标记删除并与下一段合并', () => {
     const { pkg, ctx } = makeDoc(
       `<w:p w14:paraId="AAAAAAA1">
         <w:pPr><w:rPr><w:del w:id="2" w:author="x" w:date="2026-04-23T00:00:00Z"/></w:rPr></w:pPr>
@@ -214,7 +227,9 @@ describe('段落 mark —— pPr/rPr/<w:del>', () => {
     executeAcceptRevisions(ctx, acceptOp({ scope: 'all' }));
     expect(paraCount(pkg)).toBe(1);
     const idx = buildIndices(pkg);
-    expect(idx.paraIdx.has('AAAAAAA1')).toBe(false);
+    expect(idx.paraIdx.has('AAAAAAA1')).toBe(true);
+    expect(idx.paraIdx.has('AAAAAAA2')).toBe(false);
+    expect(paraXml(pkg, 'AAAAAAA1')).toMatch(/merged[\s\S]*next/);
     expect(ctx.result.acceptedRevisions).toBe(1);
   });
 
@@ -307,48 +322,194 @@ describe('scope 三档', () => {
   });
 });
 
-// ─────────── Tier 2 属性修订拒绝 ───────────
+// ─────────── 属性修订 ───────────
 
-describe('Tier 2 属性级修订', () => {
-  test('扫到 rPrChange → UNSUPPORTED_OOXML_FEATURE', () => {
-    const { ctx } = makeDoc(
+describe('属性级修订', () => {
+  test('accept rPrChange:保留当前属性并移除历史快照', () => {
+    const { pkg, ctx } = makeDoc(
       `<w:p w14:paraId="AAAAAAA1">
         <w:r>
           <w:rPr>
+            <w:b/>
             <w:rPrChange w:id="9" w:author="x" w:date="2026-04-23T00:00:00Z">
-              <w:rPr/>
+              <w:rPr><w:i/></w:rPr>
             </w:rPrChange>
           </w:rPr>
           <w:t>x</w:t>
         </w:r>
       </w:p>`,
     );
-    try {
-      executeAcceptRevisions(ctx, acceptOp({ scope: 'all' }));
-      expect.unreachable();
-    } catch (e) {
-      expect((e as WordError).code).toBe('UNSUPPORTED_OOXML_FEATURE');
-      expect((e as WordError).message).toMatch(/rPrChange|#33/);
-    }
+    executeAcceptRevisions(ctx, acceptOp({ scope: 'all' }));
+    const xml = paraXml(pkg, 'AAAAAAA1');
+    expect(xml).toMatch(/<w:b/);
+    expect(xml).not.toMatch(/rPrChange|<w:i/);
   });
 
-  test('扫到 pPrChange → UNSUPPORTED_OOXML_FEATURE', () => {
-    const { ctx } = makeDoc(
+  test('reject pPrChange:恢复旧属性，同时保留段落标记 rPr', () => {
+    const { pkg, ctx } = makeDoc(
       `<w:p w14:paraId="AAAAAAA1">
         <w:pPr>
+          <w:jc w:val="right"/><w:rPr><w:b/></w:rPr>
           <w:pPrChange w:id="9" w:author="x" w:date="2026-04-23T00:00:00Z">
-            <w:pPr/>
+            <w:pPr><w:jc w:val="left"/></w:pPr>
           </w:pPrChange>
         </w:pPr>
         <w:r><w:t>x</w:t></w:r>
       </w:p>`,
     );
-    try {
-      executeAcceptRevisions(ctx, acceptOp({ scope: 'paragraph', paraId: 'AAAAAAA1' }));
-      expect.unreachable();
-    } catch (e) {
-      expect((e as WordError).code).toBe('UNSUPPORTED_OOXML_FEATURE');
-    }
+    executeRejectRevisions(ctx, rejectOp({ scope: 'paragraph', paraId: 'AAAAAAA1' }));
+    const xml = paraXml(pkg, 'AAAAAAA1');
+    expect(xml).toMatch(/w:val="left"/);
+    expect(xml).toMatch(/<w:rPr><w:b/);
+    expect(xml).not.toMatch(/right|pPrChange/);
+  });
+
+  test('reject 覆盖 section/table/row/cell/grid/exception 属性快照', () => {
+    const { pkg, ctx } = makeDoc(
+      `<w:tbl>
+        <w:tblPr><w:tblStyle w:val="new"/><w:tblPrChange w:id="1"><w:tblPr><w:tblStyle w:val="old"/></w:tblPr></w:tblPrChange></w:tblPr>
+        <w:tblGrid><w:gridCol w:w="200"/><w:tblGridChange w:id="2"><w:tblGrid><w:gridCol w:w="100"/></w:tblGrid></w:tblGridChange></w:tblGrid>
+        <w:tr>
+          <w:trPr><w:cantSplit/><w:trPrChange w:id="3"><w:trPr><w:tblHeader/></w:trPr></w:trPrChange></w:trPr>
+          <w:tblPrEx><w:tblCellSpacing w:w="20"/><w:tblPrExChange w:id="4"><w:tblPrEx><w:tblCellSpacing w:w="10"/></w:tblPrEx></w:tblPrExChange></w:tblPrEx>
+          <w:tc><w:tcPr><w:tcW w:w="200"/><w:tcPrChange w:id="5"><w:tcPr><w:tcW w:w="100"/></w:tcPr></w:tcPrChange></w:tcPr><w:p/></w:tc>
+        </w:tr>
+      </w:tbl>
+      <w:sectPr><w:pgSz w:w="200"/><w:sectPrChange w:id="6"><w:sectPr><w:pgSz w:w="100"/></w:sectPr></w:sectPrChange></w:sectPr>`,
+    );
+    executeRejectRevisions(ctx, rejectOp({ scope: 'all' }));
+    const xml = documentXml(pkg);
+    expect(xml).not.toMatch(/PrChange|tblGridChange/);
+    expect(xml).toContain('w:val="old"');
+    expect(xml).toContain('w:w="100"');
+    expect(xml).toContain('w:w="10"');
+    expect(xml).toMatch(/tblHeader/);
+    expect(xml).not.toMatch(/w:val="new"|w:w="200"|cantSplit/);
+    expect(ctx.result.rejectedRevisions).toBe(6);
+  });
+});
+
+describe('表格结构修订', () => {
+  test('行插入/删除标记按整行语义 accept/reject', () => {
+    const accepted = makeDoc(
+      `<w:tbl>
+        <w:tr><w:trPr><w:ins w:id="1"/></w:trPr><w:tc><w:p><w:r><w:t>inserted</w:t></w:r></w:p></w:tc></w:tr>
+        <w:tr><w:trPr><w:del w:id="2"/></w:trPr><w:tc><w:p><w:r><w:t>deleted</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>`,
+    );
+    executeAcceptRevisions(accepted.ctx, acceptOp({ scope: 'all' }));
+    expect(documentXml(accepted.pkg)).toMatch(/inserted/);
+    expect(documentXml(accepted.pkg)).not.toMatch(/deleted|<w:ins|<w:del/);
+
+    const rejected = makeDoc(
+      `<w:tbl>
+        <w:tr><w:trPr><w:ins w:id="1"/></w:trPr><w:tc><w:p><w:r><w:t>inserted</w:t></w:r></w:p></w:tc></w:tr>
+        <w:tr><w:trPr><w:del w:id="2"/></w:trPr><w:tc><w:p><w:r><w:t>deleted</w:t></w:r></w:p></w:tc></w:tr>
+      </w:tbl>`,
+    );
+    executeRejectRevisions(rejected.ctx, rejectOp({ scope: 'all' }));
+    expect(documentXml(rejected.pkg)).not.toMatch(/inserted|<w:ins|<w:del/);
+    expect(documentXml(rejected.pkg)).toMatch(/deleted/);
+  });
+
+  test('cellIns/cellDel/cellMerge 具有独立 accept/reject 语义', () => {
+    const inserted = makeDoc(
+      `<w:tbl><w:tr><w:tc><w:tcPr><w:cellIns w:id="1"/></w:tcPr><w:p/></w:tc></w:tr></w:tbl>`,
+    );
+    executeRejectRevisions(inserted.ctx, rejectOp({ scope: 'all' }));
+    expect(documentXml(inserted.pkg)).not.toMatch(/<w:tc/);
+
+    const deleted = makeDoc(
+      `<w:tbl><w:tr><w:tc><w:tcPr><w:cellDel w:id="2"/></w:tcPr><w:p/></w:tc></w:tr></w:tbl>`,
+    );
+    executeRejectRevisions(deleted.ctx, rejectOp({ scope: 'all' }));
+    expect(documentXml(deleted.pkg)).toMatch(/<w:tc/);
+    expect(documentXml(deleted.pkg)).not.toMatch(/cellDel/);
+
+    const merged = makeDoc(
+      `<w:tbl><w:tr><w:tc><w:tcPr><w:cellMerge w:id="3" w:vMerge="rest"/></w:tcPr><w:p/></w:tc></w:tr></w:tbl>`,
+    );
+    executeAcceptRevisions(merged.ctx, acceptOp({ scope: 'all' }));
+    expect(documentXml(merged.pkg)).toMatch(/<w:vMerge w:val="restart"/);
+    expect(documentXml(merged.pkg)).not.toMatch(/cellMerge/);
+  });
+});
+
+describe('移动和 custom XML 范围修订', () => {
+  test('accept move 保留目标、删除来源并清理 range markers', () => {
+    const { pkg, ctx } = makeDoc(
+      `<w:p w14:paraId="AAAAAAA1">
+        <w:moveFromRangeStart w:id="10" w:name="m"/><w:moveFrom w:id="1" w:name="m"><w:r><w:delText>source</w:delText></w:r></w:moveFrom><w:moveFromRangeEnd w:id="10" w:name="m"/>
+        <w:moveToRangeStart w:id="11" w:name="m"/><w:moveTo w:id="2" w:name="m"><w:r><w:t>target</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id="11" w:name="m"/>
+      </w:p>`,
+    );
+    executeAcceptRevisions(ctx, acceptOp({ scope: 'all' }));
+    const xml = paraXml(pkg, 'AAAAAAA1');
+    expect(xml).not.toMatch(/source|moveFrom|moveTo|Range/);
+    expect(xml).toMatch(/target/);
+  });
+
+  test('reject move 恢复来源文本并删除目标', () => {
+    const { pkg, ctx } = makeDoc(
+      `<w:p w14:paraId="AAAAAAA1"><w:moveFrom w:id="1"><w:r><w:delText>source</w:delText></w:r></w:moveFrom><w:moveTo w:id="2"><w:r><w:t>target</w:t></w:r></w:moveTo></w:p>`,
+    );
+    executeRejectRevisions(ctx, rejectOp({ scope: 'all' }));
+    const xml = paraXml(pkg, 'AAAAAAA1');
+    expect(xml).toMatch(/<w:t>source<\/w:t>/);
+    expect(xml).not.toMatch(/target|moveFrom|moveTo|delText/);
+  });
+
+  test('custom XML 插入/删除范围按边界处理内容', () => {
+    const inserted = makeDoc(
+      `<w:p w14:paraId="AAAAAAA1"><w:customXmlInsRangeStart w:id="1"/><w:r><w:t>new</w:t></w:r><w:customXmlInsRangeEnd w:id="1"/><w:r><w:t>keep</w:t></w:r></w:p>`,
+    );
+    executeRejectRevisions(inserted.ctx, rejectOp({ scope: 'all' }));
+    expect(paraXml(inserted.pkg, 'AAAAAAA1')).not.toMatch(/new|customXml/);
+    expect(paraXml(inserted.pkg, 'AAAAAAA1')).toMatch(/keep/);
+
+    const deleted = makeDoc(
+      `<w:p w14:paraId="AAAAAAA1"><w:customXmlDelRangeStart w:id="2"/><w:r><w:delText>old</w:delText></w:r><w:customXmlDelRangeEnd w:id="2"/></w:p>`,
+    );
+    executeRejectRevisions(deleted.ctx, rejectOp({ scope: 'all' }));
+    expect(paraXml(deleted.pkg, 'AAAAAAA1')).toMatch(/<w:t>old<\/w:t>/);
+    expect(paraXml(deleted.pkg, 'AAAAAAA1')).not.toMatch(/customXml|delText/);
+  });
+
+  test('custom XML 范围可跨段落容器', () => {
+    const { pkg, ctx } = makeDoc(
+      `<w:p w14:paraId="AAAAAAA1"><w:customXmlInsRangeStart w:id="8"/><w:r><w:t>first</w:t></w:r></w:p>
+       <w:p w14:paraId="AAAAAAA2"><w:r><w:t>second</w:t></w:r><w:customXmlInsRangeEnd w:id="8"/></w:p>
+       <w:p w14:paraId="AAAAAAA3"><w:r><w:t>keep</w:t></w:r></w:p>`,
+    );
+    executeRejectRevisions(ctx, rejectOp({ scope: 'all' }));
+    const xml = documentXml(pkg);
+    expect(xml).not.toMatch(/first|second|customXml/);
+    expect(xml).toMatch(/keep/);
+  });
+});
+
+describe('Office 2010 冲突修订', () => {
+  test('conflictIns/conflictDel 按插入/删除语义 accept', () => {
+    const { pkg, ctx } = makeDoc(
+      `<w:p xmlns:w14="${W14_NS}" w14:paraId="AAAAAAA1">
+        <w14:conflictIns w:id="1"><w:r><w:t>inserted</w:t></w:r></w14:conflictIns>
+        <w14:conflictDel w:id="2"><w:r><w:delText>deleted</w:delText></w:r></w14:conflictDel>
+      </w:p>`,
+    );
+    executeAcceptRevisions(ctx, acceptOp({ scope: 'all' }));
+    const xml = paraXml(pkg, 'AAAAAAA1');
+    expect(xml).toMatch(/inserted/);
+    expect(xml).not.toMatch(/deleted|conflictIns|conflictDel/);
+  });
+
+  test('custom XML conflict range reject 恢复删除内容', () => {
+    const { pkg, ctx } = makeDoc(
+      `<w:p xmlns:w14="${W14_NS}" w14:paraId="AAAAAAA1"><w14:customXmlConflictDelRangeStart w:id="3"/><w:r><w:delText>restored</w:delText></w:r><w14:customXmlConflictDelRangeEnd w:id="3"/></w:p>`,
+    );
+    executeRejectRevisions(ctx, rejectOp({ scope: 'all' }));
+    const xml = paraXml(pkg, 'AAAAAAA1');
+    expect(xml).toMatch(/<w:t>restored<\/w:t>/);
+    expect(xml).not.toMatch(/customXmlConflict|delText/);
   });
 });
 
