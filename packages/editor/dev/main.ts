@@ -337,6 +337,7 @@ async function main(): Promise<void> {
     let lastSaveResult: NativeWordChangeApplyResult | null = null;
     let lastSavedDocxSummary: unknown = null;
     nativeEditor = renderNativeWordEditor(editorRoot, wordView, {
+      readOnly: selectedReadOnly(),
       onChange: () => renderInspector(),
       styleText: editorStyles,
     });
@@ -589,6 +590,11 @@ async function renderPptDev(app: HTMLDivElement): Promise<void> {
     presentationId: fixtures[selectedIndex]?.name ?? `ppt-fixture-${selectedIndex}`,
     resolveImagePreview: resolvePptImagePreview,
   });
+  const previewWidth = Number(new URLSearchParams(location.search).get('previewWidth'));
+  if (Number.isFinite(previewWidth) && previewWidth > 0) {
+    host.style.width = `${previewWidth}px`;
+    host.style.marginInline = 'auto';
+  }
   let lastObjectAction:
     | {
         action:
@@ -613,6 +619,8 @@ async function renderPptDev(app: HTMLDivElement): Promise<void> {
     | null = null;
   const editor = renderNativePptEditor(host, view, {
     styleIsolation: 'shadow',
+    readOnly: selectedReadOnly(),
+    showSlideList: selectedPptSlideListVisible(),
     onChange: () => render(),
     onObjectAction: (event) => {
       lastObjectAction = event;
@@ -1268,6 +1276,7 @@ async function renderSpreadsheetPublicDev(app: HTMLDivElement): Promise<void> {
     latestBytes = new Uint8Array(await fileResponse.arrayBuffer());
     editor = await renderSpreadsheetEditor(host, latestBytes, {
       workbookId: `editor-public-fixture-${index}`,
+      readOnly: selectedReadOnly(),
       showSheetTabs: true,
       styleIsolation: 'shadow',
       enableHeaderFilters: false,
@@ -7044,6 +7053,14 @@ function selectedSurface(): 'word' | 'spreadsheet' | 'spreadsheet-public' | 'ppt
 function selectedEngine(): 'prosemirror' | 'native' {
   const raw = new URLSearchParams(location.search).get('engine');
   return raw === 'native' ? 'native' : 'prosemirror';
+}
+
+function selectedReadOnly(): boolean {
+  return new URLSearchParams(location.search).get('readOnly') === '1';
+}
+
+function selectedPptSlideListVisible(): boolean {
+  return new URLSearchParams(location.search).get('showSlideList') !== '0';
 }
 
 function renderFixtureSelect(fixtures: FixtureFile[], selectedIndex: number): void {

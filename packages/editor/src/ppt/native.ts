@@ -67,6 +67,10 @@ type PptParagraphStyle = NonNullable<PptSceneNode['textParagraphs']>[number]['st
 
 export interface NativePptEditorOptions {
   styleIsolation?: 'shadow' | 'none';
+  /** Allows navigation, selection and copy while blocking every presentation mutation. */
+  readOnly?: boolean;
+  /** Controls the built-in thumbnail rail for hosts that provide their own slide navigation. */
+  showSlideList?: boolean;
   onChange?: (event: { revision: number; bytes: Uint8Array }) => void | Promise<void>;
   onObjectAction?: (event: {
     action:
@@ -106,6 +110,8 @@ export interface NativePptEditorOptions {
 export interface NativePptEditor {
   session(): PptEditorSession;
   selection(): PptEditorSelection;
+  isReadOnly(): boolean;
+  setReadOnly(readOnly: boolean): void;
   dispatch(command: PptEditorCommand): Promise<void>;
   loadPresentation(bytes: Uint8Array | ArrayBuffer): Promise<void>;
   toPptx(): Promise<Uint8Array>;
@@ -354,7 +360,7 @@ class NativePptEditorController implements NativePptEditor {
   constructor(host: HTMLElement, view: PptEditorView, options: NativePptEditorOptions) {
     this.options = options;
     this.root = options.styleIsolation === 'none' ? host : host.attachShadow({ mode: 'open' });
-    this.sessionValue = new PptEditorSession(view);
+    this.sessionValue = new PptEditorSession(view, { readOnly: options.readOnly });
     this.imageResources = view.images;
     this.fontResources = view.fonts;
     this.referencedFontFamilies = usedFontFamiliesInView(view);
@@ -379,6 +385,25 @@ class NativePptEditorController implements NativePptEditor {
 
   selection(): PptEditorSelection {
     return this.sessionValue.selection();
+  }
+
+  isReadOnly(): boolean {
+    return this.sessionValue.isReadOnly();
+  }
+
+  setReadOnly(readOnly: boolean): void {
+    if (this.isReadOnly() === readOnly) return;
+    const editable = this.root.querySelector<HTMLElement>('[contenteditable="true"]');
+    editable?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    if (this.dragState) {
+      this.restoreDragElementBounds(this.dragState);
+      this.clearDragVisualState(this.dragState.element, true);
+      this.dragState = null;
+      this.hideSnapGuides();
+    }
+    this.hideContextMenu();
+    this.sessionValue.setReadOnly(readOnly);
+    this.render();
   }
 
   async dispatch(command: PptEditorCommand): Promise<void> {
@@ -461,6 +486,8 @@ class NativePptEditorController implements NativePptEditor {
       ${fontFaceCss(this.fontResources)}
       :host, .coco-ppt-editor { box-sizing: border-box; width: 100%; height: 100%; min-height: 360px; }
       .coco-ppt-editor { display: grid; grid-template-columns: 160px minmax(0, 1fr); background: #f4f6f8; color: #17202a; font: 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .coco-ppt-editor[data-show-slide-list="false"] { grid-template-columns: minmax(0, 1fr); }
+      .coco-ppt-editor[data-show-slide-list="false"] .coco-ppt-slides { display: none; }
       .coco-ppt-slides { overflow: auto; border-right: 1px solid #d7dde5; background: #edf1f5; padding: 8px; }
       .coco-ppt-thumb { width: 128px; aspect-ratio: 16 / 9; margin: 0 0 8px; border: 1px solid #c7d0dc; background: #fff; display: block; position: relative; overflow: hidden; cursor: pointer; padding: 0; }
       .coco-ppt-thumb[data-selected="true"] { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18); }
@@ -490,6 +517,11 @@ class NativePptEditorController implements NativePptEditor {
       .coco-ppt-table td[contenteditable="true"] { cursor: text; outline: 2px solid #2563eb; outline-offset: -2px; }
       .coco-ppt-node[contenteditable="true"] { cursor: text; outline: 2px solid rgba(37, 99, 235, 0.3); user-select: text; }
       .coco-ppt-text-layer[contenteditable="true"] { cursor: text; outline: 2px solid rgba(37, 99, 235, 0.3); user-select: text; }
+      .coco-ppt-editor[data-read-only="true"] .coco-ppt-node,
+      .coco-ppt-editor[data-read-only="true"] .coco-ppt-text-layer,
+      .coco-ppt-editor[data-read-only="true"] .coco-ppt-rich-text,
+      .coco-ppt-editor[data-read-only="true"] .coco-ppt-paragraph { user-select: text; cursor: text; }
+      .coco-ppt-editor[data-read-only="true"] .coco-ppt-resize-handle { display: none !important; }
       .coco-ppt-node[data-kind="picture"] { background: transparent; }
       .coco-ppt-unsupported-image { position: absolute; inset: 0; display: grid; place-items: center; box-sizing: border-box; border: 1px dashed rgba(100, 116, 139, 0.48); background: repeating-linear-gradient(135deg, rgba(148, 163, 184, 0.12) 0 8px, rgba(248, 250, 252, 0.1) 8px 16px); color: rgba(51, 65, 85, 0.72); font: 11px/1.2 "Segoe UI", sans-serif; pointer-events: none; }
       .coco-ppt-thumb-node .coco-ppt-unsupported-image { font-size: 8px; border-width: 0.5px; }
@@ -526,6 +558,8 @@ class NativePptEditorController implements NativePptEditor {
     `;
     const shell = document.createElement('div');
     shell.className = 'coco-ppt-editor';
+    shell.dataset.showSlideList = String(this.options.showSlideList !== false);
+    shell.dataset.readOnly = String(this.isReadOnly());
     this.slideList.className = 'coco-ppt-slides';
     const stage = document.createElement('div');
     stage.className = 'coco-ppt-stage';
@@ -570,9 +604,11 @@ class NativePptEditorController implements NativePptEditor {
   }
 
   private render(): void {
+    const shell = this.root.querySelector<HTMLElement>('.coco-ppt-editor');
+    if (shell) shell.dataset.readOnly = String(this.isReadOnly());
     const scene = this.sessionValue.scene();
     this.slideList.replaceChildren(
-      ...scene.slides.map((slide) => {
+      ...(this.options.showSlideList === false ? [] : scene.slides.map((slide) => {
         const thumb = document.createElement('button');
         thumb.className = 'coco-ppt-thumb';
         thumb.type = 'button';
@@ -593,9 +629,9 @@ class NativePptEditorController implements NativePptEditor {
           () => void this.dispatch({ kind: 'select-slide', slideIdOrIndex: slide.id }),
         );
         return thumb;
-      }),
+      })),
     );
-    this.renderVisibleThumbnails(scene.slides);
+    if (this.options.showSlideList !== false) this.renderVisibleThumbnails(scene.slides);
     const selected = this.currentSlide();
     if (!selected) {
       this.canvas.replaceChildren();
@@ -743,8 +779,8 @@ class NativePptEditorController implements NativePptEditor {
     element.dataset.kind = node.kind;
     element.dataset.locked = String(node.locked);
     if (interactive) {
-      element.dataset.draggable = String(node.capabilities.editGeometry);
-      element.dataset.resizable = String(node.capabilities.editGeometry);
+      element.dataset.draggable = String(!this.isReadOnly() && node.capabilities.editGeometry);
+      element.dataset.resizable = String(!this.isReadOnly() && node.capabilities.editGeometry);
       element.dataset.shapeId = node.id;
     }
     element.style.left = `${node.bounds.left * scale - (lineNode && lineAxis === 'vertical' ? nodeWidth / 2 : 0)}px`;
@@ -842,6 +878,7 @@ class NativePptEditorController implements NativePptEditor {
           });
         });
         table.addEventListener('dblclick', (event) => {
+          if (this.isReadOnly()) return;
           const cell = tableCellFromEvent(event);
           if (!cell || !node.capabilities.editTableCells) return;
           event.stopPropagation();
@@ -900,7 +937,7 @@ class NativePptEditorController implements NativePptEditor {
     const handle = document.createElement('div');
     handle.className = 'coco-ppt-resize-handle';
     handle.addEventListener('mousedown', (event) => {
-      if (!node.capabilities.editGeometry) return;
+      if (this.isReadOnly() || !node.capabilities.editGeometry) return;
       event.preventDefault();
       event.stopPropagation();
       this.startDrag(event, 'resize', slide, node, scale, element);
@@ -953,6 +990,7 @@ class NativePptEditorController implements NativePptEditor {
       });
     });
     element.addEventListener('contextmenu', (event) => {
+      if (this.isReadOnly()) return;
       event.preventDefault();
       event.stopPropagation();
       const targetNode = this.pointerOperationNode(slide, node, event, scale) ?? node;
@@ -967,6 +1005,7 @@ class NativePptEditorController implements NativePptEditor {
       const targetElement = elementForShape(this.canvas, targetNode.id) ?? element;
       if (
         isEditingText(targetElement, event.target) ||
+        this.isReadOnly() ||
         event.button !== 0 ||
         !targetNode.capabilities.editGeometry
       )
@@ -976,6 +1015,7 @@ class NativePptEditorController implements NativePptEditor {
       this.startDrag(event, 'move', slide, targetNode, scale, targetElement);
     });
     element.addEventListener('dblclick', (event) => {
+      if (this.isReadOnly()) return;
       event.stopPropagation();
       const redirectedNode = redirectedEditableTextHit(slide, node, event, scale);
       if (redirectedNode) {
@@ -1066,6 +1106,7 @@ class NativePptEditorController implements NativePptEditor {
   }
 
   private startTextEdit(element: HTMLElement, slide: PptSlideScene, node: PptSceneNode): void {
+    if (this.isReadOnly()) return;
     const originalText = node.text ?? '';
     const editableTarget = editableTextTarget(element);
     let finished = false;
@@ -1164,6 +1205,7 @@ class NativePptEditorController implements NativePptEditor {
     row: number,
     column: number,
   ): void {
+    if (this.isReadOnly()) return;
     const originalText = tableCellRawText(cell, node, row, column);
     let finished = false;
     void this.sessionValue
@@ -1252,6 +1294,7 @@ class NativePptEditorController implements NativePptEditor {
     scale: number,
     element: HTMLElement,
   ): void {
+    if (this.isReadOnly()) return;
     if (mode === 'resize') prepareTextResizePreview(element, node);
     this.dragState = {
       mode,
@@ -1610,6 +1653,7 @@ class NativePptEditorController implements NativePptEditor {
     const node = slide?.nodes.find((item) => item.id === selection.shapeId);
     if (!slide || !node) return;
     const commandKey = event.ctrlKey || event.metaKey;
+    if (this.isReadOnly()) return;
     if (commandKey && event.key.toLowerCase() === 'c') {
       event.preventDefault();
       this.copySelectedShape(slide, node);
@@ -1668,6 +1712,7 @@ class NativePptEditorController implements NativePptEditor {
   }
 
   private handleSelectStart(event: Event): void {
+    if (this.isReadOnly()) return;
     if (isTypingTarget(event.target)) return;
     if (event.target instanceof HTMLElement && event.target.closest('[contenteditable="true"]'))
       return;
@@ -1763,6 +1808,7 @@ class NativePptEditorController implements NativePptEditor {
   }
 
   private showContextMenu(event: MouseEvent, slide: PptSlideScene, node: PptSceneNode): void {
+    if (this.isReadOnly()) return;
     const editable = isShapeCollectionEditable(node);
     const hasClipboard = Boolean(this.clipboardShape);
     const run = (action: () => void) => () => {

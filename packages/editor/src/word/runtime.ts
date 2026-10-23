@@ -357,6 +357,8 @@ export type WordEditorCommand =
 export interface WordEditorRuntime {
   readonly kind: WordEditorEngineKind;
   readonly destroyed: boolean;
+  isReadOnly(): boolean;
+  setReadOnly(readOnly: boolean): void;
   destroy(): void;
   loadDocument(view: EditorDocumentView): void;
   getSourceView(): EditorDocumentView;
@@ -386,6 +388,8 @@ export interface WordEditorRuntime {
 }
 
 export interface WordEditorRuntimeOptions {
+  /** Allows navigation, selection and copy while blocking every document mutation. */
+  readOnly?: boolean;
   onChange?: (event: WordEditorChangeEvent) => void;
   onSelectionChange?: (event: WordEditorSelectionChangeEvent) => void;
   contextMenu?: boolean;

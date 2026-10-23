@@ -1,3 +1,4 @@
+export { EditorReadOnlyError } from '../read-only.js';
 export * from './model.js';
 export * from './extract.js';
 export * from './runtime.js';
