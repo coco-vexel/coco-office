@@ -323,6 +323,12 @@ async function main(): Promise<void> {
   const fixtureSummary = document.querySelector<HTMLSpanElement>('#fixtureSummary');
   if (!editorRoot || !inspector) return;
 
+  const previewWidth = Number(new URLSearchParams(location.search).get('previewWidth'));
+  if (Number.isFinite(previewWidth) && previewWidth > 0) {
+    editorRoot.style.width = `${previewWidth}px`;
+    editorRoot.style.marginInline = 'auto';
+  }
+
   if (engine === 'native') {
     editorRoot.classList.remove('coco-word-page');
     editorRoot.classList.add('coco-word-pages');

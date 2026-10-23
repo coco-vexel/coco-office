@@ -63,6 +63,10 @@ export function renderNativeDocument(doc: NativeWordDocument): HTMLElement {
     root.classList.add('has-annotation-rail');
     if (doc.pageLayout?.width !== undefined) {
       root.style.minWidth = `${twipsToPxNumber(doc.pageLayout.width) + NATIVE_ANNOTATION_RAIL_WIDTH_PX}px`;
+    } else {
+      const scrollableWidth = `calc(100% + ${NATIVE_ANNOTATION_RAIL_WIDTH_PX}px)`;
+      root.style.width = scrollableWidth;
+      root.style.minWidth = scrollableWidth;
     }
   }
   return root;

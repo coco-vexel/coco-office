@@ -36,6 +36,34 @@ function viewFixture(): EditorDocumentView {
   };
 }
 
+function revisionViewFixture(): EditorDocumentView {
+  const revised = paragraph('P1', 'Original replacement');
+  revised.flags.hasRevisions = true;
+  revised.segments = [
+    {
+      kind: 'revision',
+      from: 0,
+      to: 8,
+      text: 'Original',
+      revisionId: 'revision-delete',
+      revisionKind: 'delete',
+      author: 'Reviewer',
+      date: '2026-10-23T00:00:00.000Z',
+    },
+    {
+      kind: 'revision',
+      from: 8,
+      to: 20,
+      text: ' replacement',
+      revisionId: 'revision-insert',
+      revisionKind: 'insert',
+      author: 'Reviewer',
+      date: '2026-10-23T00:00:00.000Z',
+    },
+  ];
+  return { ...viewFixture(), blocks: [revised] };
+}
+
 function pageBreakViewFixture(): EditorDocumentView {
   const breakParagraph = paragraph('PB', '');
   breakParagraph.segments = [{
@@ -1047,5 +1075,15 @@ describe('native runtime history integration', () => {
 
     editor.destroy();
     expect(host.shadowRoot?.childElementCount).toBe(0);
+  });
+
+  test('adds the annotation rail outside the flow document width', () => {
+    editor.destroy();
+    editor = renderNativeWordEditor(host, revisionViewFixture(), { styleIsolation: 'none' });
+
+    const documentNode = host.querySelector<HTMLElement>('coco-word-native-document');
+    expect(documentNode?.classList.contains('has-annotation-rail')).toBe(true);
+    expect(documentNode?.style.width).toBe('calc(100% + 260px)');
+    expect(documentNode?.style.minWidth).toBe('calc(100% + 260px)');
   });
 });
