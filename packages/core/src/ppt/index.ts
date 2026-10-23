@@ -46,6 +46,11 @@ export {
 export { PptMutationLog, type PptMutation } from './mutations.js';
 export { createPresentationPackageFromModel } from './pptx-writer.js';
 export {
+  findMatchingPptPlaceholder,
+  resolvePptEffectivePlaceholderProperties,
+  type PptEffectivePlaceholderProperties,
+} from './placeholder-inheritance.js';
+export {
   diffPptPresentationModels,
   planPptWriteback,
   type PptDeckDiffKind,

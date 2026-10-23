@@ -1542,9 +1542,9 @@ describe('Presentation P0 live-object SDK', () => {
     await expect(tableShape.table.setValues([['A1', 'B1']])).rejects.toThrow('must match 1x1');
     await expect(tableShape.table.getCell(1, 0).text()).rejects.toThrow('cell out of range');
     await expect(tableShape.table.setCellText(0, 1, 'B1')).rejects.toThrow('cell out of range');
-    await expect(
-      tableShape.table.setCellText('__proto__' as never, 0, 'polluted'),
-    ).rejects.toThrow('cell out of range');
+    await expect(tableShape.table.setCellText('__proto__' as never, 0, 'polluted')).rejects.toThrow(
+      'cell out of range',
+    );
     await expect(
       tableShape.table.getCell(Number.NaN, 0).setStyle({ fillColor: '#ffffff' }),
     ).rejects.toThrow('cell out of range');
@@ -2617,6 +2617,32 @@ describe('Presentation P0 live-object SDK', () => {
     const presentation = await Presentation.fromZip(await makeInheritedTextStyleFixturePptx());
     const title = presentation.slides.getItem(0).shapes.getItem('TitleBox');
 
+    expect(await title.geometry()).toEqual({});
+    expect(await title.effectiveGeometry()).toEqual({
+      left: 457200,
+      top: 274638,
+      width: 8229600,
+      height: 1143000,
+    });
+    expect(await title.placeholder()).toEqual({
+      type: 'title',
+      index: '1',
+      size: 'full',
+      orientation: 'horz',
+    });
+    expect(await title.effectivePlaceholder()).toEqual({
+      type: 'title',
+      index: '1',
+      size: 'full',
+      orientation: 'horz',
+    });
+    expect(await title.text.body()).toEqual({ wrap: 'none', autoFit: 'shape' });
+    expect(await title.text.effectiveBody()).toMatchObject({
+      anchor: 'middle',
+      wrap: 'none',
+      autoFit: 'shape',
+      insetLeft: 91440,
+    });
     expect((await title.text.style()).color).toBeUndefined();
     expect(await title.text.effectiveStyle()).toMatchObject({
       color: '#22AA88',
@@ -3122,10 +3148,15 @@ async function makeInheritedTextStyleFixturePptx(): Promise<Uint8Array> {
   const slide = await zip.file('ppt/slides/slide1.xml')!.async('string');
   zip.file(
     'ppt/slides/slide1.xml',
-    slide.replace(
-      '<a:rPr sz="2000" b="1"><a:solidFill><a:srgbClr val="112233"/></a:solidFill></a:rPr>',
-      '<a:rPr sz="2000" b="1"/>',
-    ),
+    slide
+      .replace(
+        '<a:rPr sz="2000" b="1"><a:solidFill><a:srgbClr val="112233"/></a:solidFill></a:rPr>',
+        '<a:rPr sz="2000" b="1"/>',
+      )
+      .replace(
+        '<p:spPr><a:xfrm><a:off x="100" y="200"/><a:ext cx="300" cy="400"/></a:xfrm></p:spPr>',
+        '<p:spPr/>',
+      ),
   );
   zip.file(
     'ppt/slideLayouts/slideLayout1.xml',
@@ -3152,6 +3183,11 @@ async function makeInheritedTextStyleFixturePptx(): Promise<Uint8Array> {
     <p:spTree>
       <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
       <p:grpSpPr/>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="2" name="MasterTitle"/><p:cNvSpPr/><p:nvPr><p:ph type="title" idx="1"/></p:nvPr></p:nvSpPr>
+        <p:spPr><a:xfrm><a:off x="457200" y="274638"/><a:ext cx="8229600" cy="1143000"/></a:xfrm></p:spPr>
+        <p:txBody><a:bodyPr anchor="ctr" lIns="91440"><a:normAutofit/></a:bodyPr><a:lstStyle/><a:p><a:r><a:t>Master title</a:t></a:r></a:p></p:txBody>
+      </p:sp>
     </p:spTree>
   </p:cSld>
   <p:txStyles>

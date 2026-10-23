@@ -1347,6 +1347,29 @@ describe('renderNativePptEditor', () => {
     await editor.destroy();
   });
 
+  test('renders layout-inherited placeholders at their master geometry in the slide and thumbnail', async () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const view = await buildPptEditorViewFromPptx(await makeNativePlaceholderInheritancePptx());
+    expect(view.scene.slides[0]!.nodes[0]!.bounds).toEqual({
+      left: 457200,
+      top: 274638,
+      width: 8229600,
+      height: 1143000,
+    });
+    const editor = renderNativePptEditor(host, view);
+    const root = host.shadowRoot!;
+    const node = root.querySelector<HTMLElement>('.coco-ppt-node[data-shape-id="2"]')!;
+    const thumbnailNode = root.querySelector<HTMLElement>('.coco-ppt-thumb-node')!;
+
+    expect(node.textContent).toContain('Office preview');
+    expect(Number.parseFloat(thumbnailNode.style.width)).toBeGreaterThan(100);
+    expect(Number.parseFloat(thumbnailNode.style.height)).toBeGreaterThan(50);
+    expect(thumbnailNode.textContent).toContain('Office preview');
+
+    await editor.destroy();
+  });
+
   test('does not render locked decorative shape names as slide text', async () => {
     const host = document.createElement('div');
     document.body.append(host);
@@ -6927,6 +6950,78 @@ describe('renderNativePptEditor', () => {
     await editor.destroy();
   });
 });
+
+async function makeNativePlaceholderInheritancePptx(): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(await makeNativeGroupedTablePptx());
+  const contentTypes = await zip.file('[Content_Types].xml')!.async('string');
+  zip.file(
+    '[Content_Types].xml',
+    contentTypes.replace(
+      '</Types>',
+      '  <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>\n' +
+        '  <Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>\n' +
+        '</Types>',
+    ),
+  );
+  zip.file(
+    'ppt/slides/slide1.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree>
+    <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="2" name="Title 1"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+      <p:spPr/>
+      <p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Office preview</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+  </p:spTree></p:cSld>
+</p:sld>`,
+  );
+  zip.file(
+    'ppt/slides/_rels/slide1.xml.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+</Relationships>`,
+  );
+  zip.file(
+    'ppt/slideLayouts/slideLayout1.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldLayout xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree>
+    <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="2" name="Layout Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+      <p:spPr/>
+      <p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Layout title</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+  </p:spTree></p:cSld>
+</p:sldLayout>`,
+  );
+  zip.file(
+    'ppt/slideLayouts/_rels/slideLayout1.xml.rels',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
+</Relationships>`,
+  );
+  zip.file(
+    'ppt/slideMasters/slideMaster1.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree>
+    <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>
+    <p:sp>
+      <p:nvSpPr><p:cNvPr id="2" name="Master Title"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+      <p:spPr><a:xfrm><a:off x="457200" y="274638"/><a:ext cx="8229600" cy="1143000"/></a:xfrm></p:spPr>
+      <p:txBody><a:bodyPr anchor="ctr"/><a:lstStyle/><a:p><a:r><a:t>Master title</a:t></a:r></a:p></p:txBody>
+    </p:sp>
+  </p:spTree></p:cSld>
+  <p:txStyles><p:titleStyle><a:lvl1pPr><a:defRPr sz="4400"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:defRPr></a:lvl1pPr></p:titleStyle></p:txStyles>
+</p:sldMaster>`,
+  );
+  return zip.generateAsync({ type: 'uint8array' });
+}
 
 async function makeNativeGroupedTablePptx(): Promise<Uint8Array> {
   const zip = new JSZip();

@@ -16,6 +16,7 @@ import type {
   PptTextBodyProperties,
   PptTextParagraph,
 } from '@coco-vexel/coco-office/ppt';
+import { resolvePptEffectivePlaceholderProperties } from '@coco-vexel/coco-office/ppt';
 
 export type PptSceneNodeKind = PptShapeKind;
 type PptShapeStyleWithLineGradient = PptShapeStyle & {
@@ -152,7 +153,7 @@ export function buildPptSlideScene(
   ].filter(shouldRenderInheritedShape);
   const shapes = [
     ...inheritedShapes,
-    ...slide.shapes.map((shape) => applyPlaceholderInheritance(shape, layoutShapes)),
+    ...slide.shapes.map((shape) => applyPlaceholderInheritance(shape, slide.layout)),
   ];
   const renderShapes = shapes.flatMap(flattenRenderableShape);
   const background =
@@ -319,33 +320,25 @@ function normalizeRotation(rotation: number): number | undefined {
 
 function applyPlaceholderInheritance(
   shape: PptShapeModel,
-  layoutShapes: PptShapeModel[],
+  layout: PptSlideModel['layout'],
 ): PptShapeModel {
-  if (!shape.placeholder || !shape.text) return shape;
-  const layoutShape = layoutShapes.find((candidate) => samePlaceholder(shape, candidate));
-  const inheritedStyle = layoutShape?.text?.style;
-  if (!inheritedStyle && !layoutShape) return shape;
+  if (!shape.placeholder) return shape;
+  const effective = resolvePptEffectivePlaceholderProperties(shape, layout);
   return {
     ...shape,
-    geometry: {
-      ...layoutShape?.geometry,
-      ...shape.geometry,
-    },
-    text: {
-      ...shape.text,
-      style: {
-        ...inheritedStyle,
-        ...shape.text.style,
-      },
-    },
+    placeholder: effective.placeholder,
+    geometry: effective.geometry,
+    style: effective.style,
+    ...(shape.text
+      ? {
+          text: {
+            ...shape.text,
+            style: effective.textStyle,
+            body: effective.textBody,
+          },
+        }
+      : {}),
   };
-}
-
-function samePlaceholder(shape: PptShapeModel, candidate: PptShapeModel): boolean {
-  if (!candidate.placeholder) return false;
-  if (shape.placeholder?.index && candidate.placeholder.index === shape.placeholder.index)
-    return true;
-  return Boolean(shape.placeholder?.type && candidate.placeholder.type === shape.placeholder.type);
 }
 
 export function buildPptSceneNode(
