@@ -162,7 +162,8 @@ if (revision) {
 | `doc.revisions.accept(opts?)` | 接受全部支持的修订 |
 | `doc.revisions.reject(opts?)` | 拒绝全部支持的修订 |
 | `revision.revId` / `revision.id` | 修订 ID |
-| `revision.kind` | `insert` / `delete` |
+| `revision.kind` | `RevisionKind`（内容、属性、移动、表格、custom XML 修订） |
+| `revision.ooxmlType` | 精确 OOXML 修订元素名 |
 | `revision.text` | 修订涉及文本快照 |
 | `revision.getInfo()` | 读取当前 `RevisionInfo` |
 | `revision.getText()` | 读取当前修订涉及文本 |

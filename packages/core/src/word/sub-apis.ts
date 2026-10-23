@@ -1528,6 +1528,7 @@ class LiveRevision implements Revision {
   readonly id: RevisionInfo['revId'];
   readonly revId!: RevisionInfo['revId'];
   readonly kind!: RevisionInfo['kind'];
+  readonly ooxmlType!: RevisionInfo['ooxmlType'];
   readonly author!: string;
   readonly date!: string;
   readonly story!: RevisionInfo['story'];

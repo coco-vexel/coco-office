@@ -9,6 +9,7 @@ import type {
 
 export type EditorSegmentKind = 'text' | 'revision' | 'field' | 'placeholder' | 'image' | 'drawing';
 export type EditorSpanKind = 'comment' | 'revision';
+export type EditorContentRevisionKind = Extract<RevisionInfo['kind'], 'insert' | 'delete'>;
 
 export interface EditorTextSegment {
   kind: 'text';
@@ -32,7 +33,7 @@ export interface EditorRevisionSegment {
   text: string;
   format?: EditorRunFormat;
   revisionId: string;
-  revisionKind: RevisionInfo['kind'];
+  revisionKind: EditorContentRevisionKind;
   author: string;
   date: string;
 }
@@ -128,7 +129,7 @@ export interface EditorCommentSpan extends EditorTextSpan {
 export interface EditorRevisionSpan extends EditorTextSpan {
   kind: 'revision';
   revisionId: string;
-  revisionKind: RevisionInfo['kind'];
+  revisionKind: EditorContentRevisionKind;
   author: string;
   date: string;
 }

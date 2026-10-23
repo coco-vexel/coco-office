@@ -300,22 +300,13 @@ export class Kernel {
     return pureGetComment(this.indices!, id);
   }
 
-  /**
-   * 枚举修订(#26 + #33,Tier 1)。只覆盖 `<w:ins>` / `<w:del>` 标签级修订。
-   *
-   * **#33 加强**:扫到 `<w:rPrChange>` / `<w:pPrChange>` / `sectPrChange` /
-   * `numberingChange` / `moveFrom` / `moveTo` 等 Tier 2 属性级修订 → 抛
-   * `UNSUPPORTED_OOXML_FEATURE`(以前是默默忽略)。读写共用守护,与
-   * `acceptRevisions` / `rejectRevisions` 行为一致。
-   *
-   * scope 与 `listParagraphs` 一致:默认 'body',可传 'all' 或 `StoryId[]`。
-   */
+  /** 枚举 SDK 支持的内容、属性、移动、表格和 custom XML 修订。 */
   listRevisions(opts?: ListRevisionsOptions): RevisionInfo[] {
     this.assertLoaded();
     try {
       return pureListRevisions(this.pkg!, opts);
     } catch (e) {
-      // 纯函数 assertNoTier2Revisions 抛错时 docId 占位 '';kernel 层注入真实 docId
+      // 纯函数在冲突修订等明确不支持的类型上抛错；kernel 层注入真实 docId。
       if (e instanceof WordError && e.docId === '') {
         throw new WordError(e.code, e.message, this.docId!, e.details);
       }

@@ -254,7 +254,7 @@ describe('listParagraphs — filter', () => {
     expect(r2.paragraphs.map((p) => p.paraId)).toEqual(['AAAAAAA2']);
   });
 
-  test('hasRevisions:命中 w:ins / w:del', () => {
+  test('hasRevisions:命中内容和属性修订', () => {
     const pkg = createPackage();
     putXmlPart(
       pkg,
@@ -272,6 +272,7 @@ describe('listParagraphs — filter', () => {
             </w:del>
           </w:p>
           <w:p w14:paraId="AAAAAAA3"><w:r><w:t>clean</w:t></w:r></w:p>
+          <w:p w14:paraId="AAAAAAA4"><w:pPr><w:pPrChange w:id="3"><w:pPr/></w:pPrChange></w:pPr><w:r><w:t>formatted</w:t></w:r></w:p>
         </w:body>
       </w:document>`,
     );
@@ -280,7 +281,11 @@ describe('listParagraphs — filter', () => {
       filter: { hasRevisions: true },
       pagination: { mode: 'all' },
     });
-    expect(r.paragraphs.map((p) => p.paraId).sort()).toEqual(['AAAAAAA1', 'AAAAAAA2']);
+    expect(r.paragraphs.map((p) => p.paraId).sort()).toEqual([
+      'AAAAAAA1',
+      'AAAAAAA2',
+      'AAAAAAA4',
+    ]);
   });
 
   test('组合 filter:styleId + contains', () => {

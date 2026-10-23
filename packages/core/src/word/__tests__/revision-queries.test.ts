@@ -1,12 +1,11 @@
 /**
- * Revision 只读查询纯函数测试(#26,Tier 1)。
+ * Revision 只读查询纯函数测试。
  *
  * 覆盖:
  *   - w:ins / w:del 基本字段:revId / kind / author / date / story / paraId
  *   - text 字段:insert 用 `<w:t>`、delete 用 `<w:delText>`;空 text 时字段缺
  *   - scope:默认 body;'all' 包含 header / footer;StoryId[] 精确命中
- *   - Tier 1 边界:`<w:rPrChange>` / `<w:pPrChange>` 不被枚举(它们不是 w:ins/w:del
- *     标签,getElementsByTagNameNS 天然过滤)
+ *   - 内容、属性、移动、表格与 custom XML 修订统一枚举
  *   - 缺 w:id 的 ins/del 被跳过(无法稳定引用)
  *   - paragraph mark 插入(`<w:pPr><w:rPr><w:ins>`)也会被枚举,text 为空时缺字段
  */
@@ -149,8 +148,8 @@ describe('listRevisions — 基本字段', () => {
   });
 });
 
-describe('listRevisions — Tier 2 属性修订守护(#33)', () => {
-  test('扫到 <w:rPrChange> → 抛 UNSUPPORTED_OOXML_FEATURE', () => {
+describe('listRevisions — 完整修订模型', () => {
+  test('属性修订按文档顺序枚举并保留精确 OOXML 类型', () => {
     const pkg = createPackage();
     putXml(
       pkg,
@@ -158,6 +157,7 @@ describe('listRevisions — Tier 2 属性修订守护(#33)', () => {
       `<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}">
         <w:body>
           <w:p w14:paraId="AAAAAAA1">
+            <w:pPr><w:pPrChange w:id="100" w:author="p"><w:pPr/></w:pPrChange></w:pPr>
             <w:r>
               <w:rPr>
                 <w:rPrChange w:id="101" w:author="x" w:date="2026-01-01T00:00:00Z">
@@ -170,10 +170,15 @@ describe('listRevisions — Tier 2 属性修订守护(#33)', () => {
         </w:body>
       </w:document>`,
     );
-    expect(() => listRevisions(pkg)).toThrow(/rPrChange/);
+    expect(
+      listRevisions(pkg).map(({ revId, kind, ooxmlType }) => ({ revId, kind, ooxmlType })),
+    ).toEqual([
+      { revId: '100', kind: 'paragraphProperty', ooxmlType: 'pPrChange' },
+      { revId: '101', kind: 'runProperty', ooxmlType: 'rPrChange' },
+    ]);
   });
 
-  test('扫到 <w:pPrChange> → 抛 UNSUPPORTED_OOXML_FEATURE', () => {
+  test('移动、表格单元格和 custom XML 修订均可枚举', () => {
     const pkg = createPackage();
     putXml(
       pkg,
@@ -181,35 +186,56 @@ describe('listRevisions — Tier 2 属性修订守护(#33)', () => {
       `<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}">
         <w:body>
           <w:p w14:paraId="AAAAAAA1">
-            <w:pPr>
-              <w:pPrChange w:id="100" w:author="x" w:date="2026-01-01T00:00:00Z">
-                <w:pPr/>
-              </w:pPrChange>
-            </w:pPr>
-            <w:r><w:t>x</w:t></w:r>
+            <w:moveFrom w:id="1"><w:r><w:delText>from</w:delText></w:r></w:moveFrom>
+            <w:moveTo w:id="2"><w:r><w:t>to</w:t></w:r></w:moveTo>
+            <w:customXmlInsRangeStart w:id="3"/><w:r><w:t>custom</w:t></w:r><w:customXmlInsRangeEnd w:id="3"/>
           </w:p>
+          <w:tbl><w:tr><w:tc><w:tcPr>
+            <w:cellIns w:id="4"/><w:cellDel w:id="5"/><w:cellMerge w:id="6" w:vMerge="rest"/>
+          </w:tcPr><w:p/></w:tc></w:tr></w:tbl>
         </w:body>
       </w:document>`,
     );
-    expect(() => listRevisions(pkg)).toThrow(/pPrChange/);
+    const revisions = listRevisions(pkg);
+    expect(revisions.map((revision) => revision.ooxmlType)).toEqual([
+      'moveFrom',
+      'moveTo',
+      'customXmlInsRangeStart',
+      'cellIns',
+      'cellDel',
+      'cellMerge',
+    ]);
+    expect(revisions.find((revision) => revision.revId === '3')?.text).toBe('custom');
   });
 
-  test('扫到 <w:sectPrChange> → 抛', () => {
+  test('Office 2010 冲突修订进入统一模型', () => {
     const pkg = createPackage();
     putXml(
       pkg,
       'word/document.xml',
-      `<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}">
-        <w:body>
-          <w:sectPr>
-            <w:sectPrChange w:id="1" w:author="x" w:date="2026-01-01T00:00:00Z">
-              <w:sectPr/>
-            </w:sectPrChange>
-          </w:sectPr>
-        </w:body>
+      `<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}"><w:body><w:p>
+        <w14:conflictIns w:id="1"><w:r><w:t>x</w:t></w:r></w14:conflictIns>
+      </w:p></w:body>
       </w:document>`,
     );
-    expect(() => listRevisions(pkg)).toThrow(/sectPrChange/);
+    expect(listRevisions(pkg)[0]).toMatchObject({
+      revId: '1',
+      kind: 'conflictInsert',
+      ooxmlType: 'conflictIns',
+      text: 'x',
+    });
+  });
+
+  test('未知的修订形态仍明确报错，不静默忽略', () => {
+    const pkg = createPackage();
+    putXml(
+      pkg,
+      'word/document.xml',
+      `<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}"><w:body><w:p>
+        <w14:conflictFuture w:id="9"/>
+      </w:p></w:body></w:document>`,
+    );
+    expect(() => listRevisions(pkg)).toThrow(/conflictFuture/);
   });
 });
 

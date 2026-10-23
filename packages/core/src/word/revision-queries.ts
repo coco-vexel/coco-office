@@ -1,21 +1,4 @@
-/**
- * Revision(修订)只读查询(docs/03.1 §1.5 / §2,#26 + #33)。
- *
- * **Tier 1 覆盖面**:只看 `<w:ins>` / `<w:del>` —— 这是 run 级的插入/删除修订,
- * 承载 w:id / w:author / w:date 属性,以及子树内的 `<w:t>`(ins)/ `<w:delText>`(del)
- * 作为涉及文本。
- *
- * **Tier 2 属性级修订**(#33 起显式拒绝):
- *   - `<w:rPrChange>`(run 属性变更,在 `<w:rPr>` 里)
- *   - `<w:pPrChange>`(段落属性变更,在 `<w:pPr>` 里)
- *   - `<w:sectPrChange>` / `<w:tblPrChange>` / `<w:trPrChange>` / `<w:tcPrChange>` 等
- *   - `<w:numberingChange>` / `<w:moveFrom>` / `<w:moveTo>` 等
- *
- * 扫到任一 Tier 2 元素即抛 `UNSUPPORTED_OOXML_FEATURE`(`listRevisions` 与
- * `acceptRevisions` / `rejectRevisions` 共用此守护,保证读写一致)。
- *
- * scope 控制枚举的 story 集合(与 `listParagraphs` 共用 `resolveScope`)。
- */
+/** WordprocessingML revision discovery shared by the query and mutation paths. */
 import type { Package } from '../pack/index.js';
 import { W14_NS, W_NS } from './namespaces.js';
 import { resolveScope, type StoryId } from './stories.js';
@@ -23,115 +6,211 @@ import { WordError } from './word-error.js';
 
 export type RevisionId = string;
 
+export type RevisionKind =
+  | 'insert'
+  | 'delete'
+  | 'moveFrom'
+  | 'moveTo'
+  | 'runProperty'
+  | 'paragraphProperty'
+  | 'sectionProperty'
+  | 'tableProperty'
+  | 'tableRowProperty'
+  | 'tableCellProperty'
+  | 'tablePropertyException'
+  | 'tableGrid'
+  | 'numbering'
+  | 'cellInsert'
+  | 'cellDelete'
+  | 'cellMerge'
+  | 'customXmlInsert'
+  | 'customXmlDelete'
+  | 'customXmlMoveFrom'
+  | 'customXmlMoveTo'
+  | 'conflictInsert'
+  | 'conflictDelete'
+  | 'customXmlConflictInsert'
+  | 'customXmlConflictDelete';
+
 export interface RevisionInfo {
   revId: RevisionId;
-  kind: 'insert' | 'delete';
+  kind: RevisionKind;
+  /** Exact WordprocessingML element name, for lossless classification. */
+  ooxmlType: SupportedRevisionType;
   author: string;
   date: string;
   story: StoryId;
-  /** 修订归属的段落(若 ins/del 嵌在 `<w:p>` 里才有;极少数嵌在 `<w:body>` 直子层位的则缺) */
   paraId?: string;
-  /** 涉及的文本(ins:全部 `<w:t>` 拼接;del:全部 `<w:delText>` 拼接)。为空串时省略 */
   text?: string;
 }
 
 export interface ListRevisionsOptions {
-  /** 默认 'body' */
+  /** Defaults to `body`. */
   scope?: 'body' | 'all' | StoryId[];
 }
 
-// ─────────── Tier 2 属性修订守护(#33,读/写共用)─────────────
+export const SUPPORTED_REVISION_KINDS = {
+  ins: 'insert',
+  del: 'delete',
+  moveFrom: 'moveFrom',
+  moveTo: 'moveTo',
+  rPrChange: 'runProperty',
+  pPrChange: 'paragraphProperty',
+  sectPrChange: 'sectionProperty',
+  tblPrChange: 'tableProperty',
+  trPrChange: 'tableRowProperty',
+  tcPrChange: 'tableCellProperty',
+  tblPrExChange: 'tablePropertyException',
+  tblGridChange: 'tableGrid',
+  numberingChange: 'numbering',
+  cellIns: 'cellInsert',
+  cellDel: 'cellDelete',
+  cellMerge: 'cellMerge',
+  customXmlInsRangeStart: 'customXmlInsert',
+  customXmlDelRangeStart: 'customXmlDelete',
+  customXmlMoveFromRangeStart: 'customXmlMoveFrom',
+  customXmlMoveToRangeStart: 'customXmlMoveTo',
+} as const satisfies Record<string, RevisionKind>;
 
-/**
- * Tier 2 属性级修订 local name 集合。
- * 扫到任一即抛 `UNSUPPORTED_OOXML_FEATURE`(`listRevisions` 与 `accept/rejectRevisions`
- * 共用此守护,保证只读/只写对 Tier 2 的态度一致)。
- */
-export const TIER2_REVISION_LOCAL_NAMES: readonly string[] = [
-  'rPrChange',
-  'pPrChange',
-  'sectPrChange',
-  'tblPrChange',
-  'tcPrChange',
-  'trPrChange',
-  'tblPrExChange',
-  'tblGridChange',
-  'numberingChange',
-  'moveFrom',
-  'moveTo',
-];
+export type SupportedRevisionLocalName = keyof typeof SUPPORTED_REVISION_KINDS;
 
-/**
- * 扫 `root`(Document 或 Element 子树)里是否存在 Tier 2 属性修订元素;
- * 发现一个立即抛 `WordError('UNSUPPORTED_OOXML_FEATURE')`。
- *
- * `docIdForError` 用于错误注入。调用方在读(listRevisions)/ 写(accept/reject)
- * 路径上各自提供自己的 docId。
- */
-export function assertNoTier2Revisions(
+export const SUPPORTED_W14_REVISION_KINDS = {
+  conflictIns: 'conflictInsert',
+  conflictDel: 'conflictDelete',
+  customXmlConflictInsRangeStart: 'customXmlConflictInsert',
+  customXmlConflictDelRangeStart: 'customXmlConflictDelete',
+} as const satisfies Record<string, RevisionKind>;
+
+export type SupportedW14RevisionLocalName = keyof typeof SUPPORTED_W14_REVISION_KINDS;
+export type SupportedRevisionType = SupportedRevisionLocalName | SupportedW14RevisionLocalName;
+
+/** Pair/position markers are part of a revision but are not separate SDK revisions. */
+export const REVISION_RANGE_MARKER_NAMES = [
+  'moveFromRangeStart',
+  'moveFromRangeEnd',
+  'moveToRangeStart',
+  'moveToRangeEnd',
+  'customXmlInsRangeEnd',
+  'customXmlDelRangeEnd',
+  'customXmlMoveFromRangeEnd',
+  'customXmlMoveToRangeEnd',
+] as const;
+
+export const W14_REVISION_RANGE_MARKER_NAMES = [
+  'customXmlConflictInsRangeEnd',
+  'customXmlConflictDelRangeEnd',
+] as const;
+
+export function isSupportedRevisionElement(el: Element): boolean {
+  return (
+    (el.namespaceURI === W_NS &&
+      Object.prototype.hasOwnProperty.call(SUPPORTED_REVISION_KINDS, el.localName)) ||
+    (el.namespaceURI === W14_NS &&
+      Object.prototype.hasOwnProperty.call(SUPPORTED_W14_REVISION_KINDS, el.localName))
+  );
+}
+
+export function assertNoUnsupportedRevisions(
   root: Document | Element,
   docIdForError: string,
   opContext: 'listRevisions' | 'acceptRevisions' | 'rejectRevisions',
 ): void {
-  for (const local of TIER2_REVISION_LOCAL_NAMES) {
-    const els = root.getElementsByTagNameNS(W_NS, local);
-    if (els.length > 0) {
-      throw new WordError(
-        'UNSUPPORTED_OOXML_FEATURE',
-        `Tier 2 revision '<w:${local}>' is not supported (op: ${opContext}); ` +
-          `only <w:ins> / <w:del> are covered in Tier 1`,
-        docIdForError,
-        { revisionKind: local, opName: opContext },
-      );
+  const visit = (node: Node): void => {
+    if (node.nodeType === 1) {
+      const el = node as Element;
+      if (looksLikeRevisionElement(el) && !isKnownRevisionOrMarker(el)) {
+        throw new WordError(
+          'UNSUPPORTED_OOXML_FEATURE',
+          `Revision element '${el.nodeName}' is not supported (op: ${opContext})`,
+          docIdForError,
+          { revisionKind: el.localName, opName: opContext },
+        );
+      }
     }
-  }
+    for (let i = 0; i < node.childNodes.length; i++) {
+      const child = node.childNodes[i];
+      if (child) visit(child);
+    }
+  };
+  visit(root);
 }
 
-// ─────────── 公共入口 ───────────
+function looksLikeRevisionElement(el: Element): boolean {
+  if (el.namespaceURI === W14_NS) {
+    return el.localName.startsWith('conflict') || el.localName.startsWith('customXmlConflict');
+  }
+  if (el.namespaceURI !== W_NS) return false;
+  return (
+    /(?:Pr|Grid)Change$/.test(el.localName) ||
+    el.localName === 'numberingChange' ||
+    /^(?:ins|del|moveFrom|moveTo|cellIns|cellDel|cellMerge)$/.test(el.localName) ||
+    /^(?:customXml(?:Ins|Del|MoveFrom|MoveTo)|move(?:From|To))Range(?:Start|End)$/.test(
+      el.localName,
+    )
+  );
+}
+
+function isKnownRevisionOrMarker(el: Element): boolean {
+  if (isSupportedRevisionElement(el)) return true;
+  if (el.namespaceURI === W_NS) {
+    return (REVISION_RANGE_MARKER_NAMES as readonly string[]).includes(el.localName);
+  }
+  if (el.namespaceURI === W14_NS) {
+    return (W14_REVISION_RANGE_MARKER_NAMES as readonly string[]).includes(el.localName);
+  }
+  return false;
+}
 
 export function listRevisions(pkg: Package, opts: ListRevisionsOptions = {}): RevisionInfo[] {
   const stories = resolveScope(pkg, opts.scope ?? 'body');
   const out: RevisionInfo[] = [];
-
   for (const story of stories) {
-    // Tier 2 守护(#33):扫到 rPrChange / pPrChange / 等 → 抛
-    // docId 本处没有(`listRevisions` 是 Package 级 helper,不知道 WordDocument.docId);
-    // 用占位 '' 让 kernel 层的 toWordError 做二次注入。
-    assertNoTier2Revisions(story.root, '', 'listRevisions');
-
-    // 直接在 story root 上 getElementsByTagNameNS —— 只取该 story 子树内的 ins/del,
-    // 不跨 sub-story(footnote 根单独一个 story,这里会在 footnote root 上再扫一轮)
-    for (const { el, kind } of collectRevisionElementsInDocumentOrder(story.root)) {
-      const info = buildRevisionInfo(el, kind, story.id);
+    assertNoUnsupportedRevisions(story.root, '', 'listRevisions');
+    for (const el of collectSupportedRevisionElements(story.root)) {
+      const info = buildRevisionInfo(el, story.id);
       if (info) out.push(info);
     }
   }
-
   return out;
 }
 
-// ─────────── 内部 ───────────
+export function collectSupportedRevisionElements(root: Document | Element): Element[] {
+  const out: Element[] = [];
+  const visit = (node: Node): void => {
+    if (node.nodeType === 1 && isSupportedRevisionElement(node as Element))
+      out.push(node as Element);
+    for (let i = 0; i < node.childNodes.length; i++) {
+      const child = node.childNodes[i];
+      if (child) visit(child);
+    }
+  };
+  visit(root);
+  return out;
+}
 
-function buildRevisionInfo(
-  el: Element,
-  kind: 'insert' | 'delete',
-  story: StoryId,
-): RevisionInfo | null {
+function buildRevisionInfo(el: Element, story: StoryId): RevisionInfo | null {
   const revId = el.getAttributeNS(W_NS, 'id');
-  if (revId === null) return null; // 缺 id 的 ins/del 跳过 —— 无法稳定引用
-
-  const author = el.getAttributeNS(W_NS, 'author') ?? '';
-  const date = el.getAttributeNS(W_NS, 'date') ?? '';
+  if (revId === null) return null;
+  const ooxmlType = el.localName as SupportedRevisionType;
+  const kind =
+    el.namespaceURI === W14_NS
+      ? SUPPORTED_W14_REVISION_KINDS[ooxmlType as SupportedW14RevisionLocalName]
+      : SUPPORTED_REVISION_KINDS[ooxmlType as SupportedRevisionLocalName];
+  const info: RevisionInfo = {
+    revId,
+    kind,
+    ooxmlType,
+    author: el.getAttributeNS(W_NS, 'author') ?? '',
+    date: el.getAttributeNS(W_NS, 'date') ?? '',
+    story,
+  };
   const paraId = findContainingParaId(el);
-  const text = extractRevisionText(el, kind);
-
-  const info: RevisionInfo = { revId, kind, author, date, story };
+  const text = extractRevisionText(el, ooxmlType);
   if (paraId !== undefined) info.paraId = paraId;
   if (text.length > 0) info.text = text;
   return info;
 }
 
-/** 从 ins/del 元素向上走到最近的 `<w:p>`,返回其 `w14:paraId`(大写);没有则返回 undefined */
 function findContainingParaId(el: Element): string | undefined {
   let cur: Node | null = el.parentNode;
   while (cur && cur.nodeType === 1) {
@@ -145,50 +224,72 @@ function findContainingParaId(el: Element): string | undefined {
   return undefined;
 }
 
-/**
- * 涉及文本:
- *   - insert: 后代 `<w:t>`
- *   - delete: 后代 `<w:delText>`
- *
- * 说明:`<w:ins>` 可能嵌套内容 wrapper(如 `<w:ins><w:r><w:t>` 或
- * `<w:ins><w:hyperlink><w:r><w:t>`)—— 统一用 getElementsByTagNameNS 吃全部后代。
- */
-function extractRevisionText(el: Element, kind: 'insert' | 'delete'): string {
-  const tag = kind === 'insert' ? 't' : 'delText';
-  const nodes = el.getElementsByTagNameNS(W_NS, tag);
+function extractRevisionText(el: Element, type: SupportedRevisionType): string {
+  if (type.includes('RangeStart')) return extractRangeText(el, type);
+  const textNames =
+    type === 'del' || type === 'moveFrom' || type === 'conflictDel'
+      ? ['delText', 't']
+      : type === 'ins' || type === 'moveTo' || type === 'conflictIns'
+        ? ['t']
+        : [];
   let out = '';
-  for (let i = 0; i < nodes.length; i++) {
-    out += nodes[i]!.textContent ?? '';
+  for (const name of textNames) {
+    const nodes = el.getElementsByTagNameNS(W_NS, name);
+    for (let i = 0; i < nodes.length; i++) out += nodes[i]?.textContent ?? '';
+    if (out.length > 0) break;
   }
   return out;
 }
 
-function collectRevisionElementsInDocumentOrder(
-  root: Document | Element,
-): Array<{ el: Element; kind: 'insert' | 'delete' }> {
-  const out: Array<{ el: Element; kind: 'insert' | 'delete' }> = [];
+function extractRangeText(el: Element, type: SupportedRevisionType): string {
+  const endName =
+    type === 'customXmlInsRangeStart'
+      ? 'customXmlInsRangeEnd'
+      : type === 'customXmlDelRangeStart'
+        ? 'customXmlDelRangeEnd'
+        : type === 'customXmlMoveFromRangeStart'
+          ? 'customXmlMoveFromRangeEnd'
+          : type === 'customXmlMoveToRangeStart'
+            ? 'customXmlMoveToRangeEnd'
+            : type === 'customXmlConflictInsRangeStart'
+              ? 'customXmlConflictInsRangeEnd'
+              : 'customXmlConflictDelRangeEnd';
+  const id = el.getAttributeNS(W_NS, 'id');
+  const all = flattenNodes(el.ownerDocument!);
+  const startIndex = all.indexOf(el);
+  const endIndex = all.findIndex(
+    (node, index) =>
+      index > startIndex &&
+      node.nodeType === 1 &&
+      (node as Element).namespaceURI === el.namespaceURI &&
+      (node as Element).localName === endName &&
+      (node as Element).getAttributeNS(W_NS, 'id') === id,
+  );
+  if (startIndex < 0 || endIndex < 0) return '';
+  const preferDeleted =
+    type === 'customXmlDelRangeStart' ||
+    type === 'customXmlMoveFromRangeStart' ||
+    type === 'customXmlConflictDelRangeStart';
+  let deleted = '';
+  let normal = '';
+  for (let i = startIndex + 1; i < endIndex; i++) {
+    const node = all[i];
+    if (node?.nodeType !== 1 || (node as Element).namespaceURI !== W_NS) continue;
+    if ((node as Element).localName === 'delText') deleted += node.textContent ?? '';
+    if ((node as Element).localName === 't') normal += node.textContent ?? '';
+  }
+  return preferDeleted && deleted.length > 0 ? deleted : normal;
+}
 
-  function visit(node: Node): void {
-    if (node.nodeType === 1) {
-      const el = node as Element;
-      if (el.namespaceURI === W_NS) {
-        if (el.localName === 'ins') {
-          out.push({ el, kind: 'insert' });
-          return;
-        }
-        if (el.localName === 'del') {
-          out.push({ el, kind: 'delete' });
-          return;
-        }
-      }
-    }
-
+function flattenNodes(root: Node): Node[] {
+  const out: Node[] = [];
+  const visit = (node: Node): void => {
+    out.push(node);
     for (let i = 0; i < node.childNodes.length; i++) {
       const child = node.childNodes[i];
       if (child) visit(child);
     }
-  }
-
+  };
   visit(root);
   return out;
 }

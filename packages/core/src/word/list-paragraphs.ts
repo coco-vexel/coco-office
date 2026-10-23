@@ -20,6 +20,12 @@ import type { Package } from '../pack/index.js';
 import type { PackageIndices } from './indices.js';
 import { buildTableIndex } from './list-tables.js';
 import { MATH_NS, W14_NS, W_NS } from './namespaces.js';
+import {
+  REVISION_RANGE_MARKER_NAMES,
+  SUPPORTED_REVISION_KINDS,
+  SUPPORTED_W14_REVISION_KINDS,
+  W14_REVISION_RANGE_MARKER_NAMES,
+} from './revision-queries.js';
 import { getParagraphText, type RunTextOptions } from './runs.js';
 import { findStoryFor, getStoryParagraphs, resolveScope, type StoryId } from './stories.js';
 
@@ -36,7 +42,7 @@ export interface ListParagraphsFilter {
   contains?: string;
   /** 段内是否含 comment 标记(commentRangeStart / commentReference / commentRangeEnd) */
   hasComments?: boolean;
-  /** 段内是否含 revision 标记(Tier 1 只看 w:ins / w:del,不含 rPrChange/pPrChange) */
+  /** 段内是否含 SDK 已知的 revision 或 revision range 标记 */
   hasRevisions?: boolean;
   /**
    * 排除位于表格单元格（`<w:tc>`）内的段落。
@@ -445,12 +451,21 @@ function colIndexOf(tc: Element, tr: Element): number {
   return -1; // 理论上不可达
 }
 
-/** 段内是否含 revision 标记(Tier 1:只看 w:ins / w:del) */
+/** 段内是否含任一已知 revision 标记。 */
 function detectHasRevisions(p: Element): boolean {
-  return (
-    p.getElementsByTagNameNS(W_NS, 'ins').length > 0 ||
-    p.getElementsByTagNameNS(W_NS, 'del').length > 0
-  );
+  for (const localName of Object.keys(SUPPORTED_REVISION_KINDS)) {
+    if (p.getElementsByTagNameNS(W_NS, localName).length > 0) return true;
+  }
+  for (const localName of REVISION_RANGE_MARKER_NAMES) {
+    if (p.getElementsByTagNameNS(W_NS, localName).length > 0) return true;
+  }
+  for (const localName of Object.keys(SUPPORTED_W14_REVISION_KINDS)) {
+    if (p.getElementsByTagNameNS(W14_NS, localName).length > 0) return true;
+  }
+  for (const localName of W14_REVISION_RANGE_MARKER_NAMES) {
+    if (p.getElementsByTagNameNS(W14_NS, localName).length > 0) return true;
+  }
+  return false;
 }
 
 /** 段内是否含 comment 标记 */
