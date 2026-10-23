@@ -1,6 +1,6 @@
 {
   "name": "@coco-vexel/coco-office-oojson",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "license": "Apache-2.0",
   "description": "OOJSON to OOXML / Flat OPC conversion and writeback bridge.",
   "type": "module",
@@ -10,7 +10,7 @@
     "./browser-global": "./dist/oojson.global.js"
   },
   "dependencies": {
-    "@coco-vexel/coco-office": "workspace:^1.0.1"
+    "@coco-vexel/coco-office": "workspace:^1.0.2"
   },
   "scripts": {
     "build": "esbuild src/index.mjs --bundle --format=iife --global-name=oojson --outfile=dist/oojson.global.js --legal-comments=eof --minify",
