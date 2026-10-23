@@ -90,6 +90,7 @@
     "report:ppt-fixtures": "node scripts/ppt-fixture-report.mjs",
     "report:formula-coverage": "node scripts/formula-coverage-report.mjs",
     "report:formula-coverage:check": "node scripts/formula-coverage-report.mjs --check --require-formulas ./test-fixtures/excel",
+    "benchmark:excel-fidelity": "npm run build && node --expose-gc scripts/excel-cell-patch-benchmark.mjs",
     "fixture:formula-regression": "node scripts/create-formula-regression-fixture.mjs",
     "test:types:excel": "tsc -p test-fixtures/excel-public-api/tsconfig.json --noEmit",
     "test": "vitest run src/__tests__/smoke.test.ts src/pack/__tests__/flat-opc.test.ts src/word/__tests__/context-search.test.ts src/excel/__tests__/address.test.ts src/ppt/__tests__/public-export.test.ts --reporter=dot",

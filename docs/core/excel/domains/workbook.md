@@ -59,6 +59,14 @@ For worker isolation, use [../runtime.md](../runtime.md). `ExcelWorkbook` itself
 | `fromZip` / `fromPackage` | Synchronizes the live model back into the source package and exports bytes. |
 | `fromModel` | Creates a standalone `.xlsx` package for supported standalone domains. |
 
+For package-backed workbooks, content-only cell edits are patched into the source worksheet XML.
+Unrelated workbook, style, relationship, and worksheet parts remain untouched, and unsupported
+worksheet nodes are retained. Structural or object edits that cannot yet be expressed as a safe
+local patch continue through the normalized model synchronization path. When a calculation chain
+is present, the patch removes the stale chain and requests a full recalculation on open. Partial
+edits to shared, array, and data-table formula groups fail closed until group-aware patching is
+available.
+
 Standalone package generation supports workbook metadata, worksheets, cells, formulas, tables, legacy comments, hyperlinks, data validations, conditional formats, and basic charts created through `sheet.charts.add(...)`. It does not synthesize arbitrary drawings, images, shapes, threaded comments, or styles from scratch.
 
 ## Defined Names

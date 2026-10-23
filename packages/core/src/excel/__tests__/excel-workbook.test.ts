@@ -768,6 +768,185 @@ describe('ExcelWorkbook', () => {
     expect(outputSheet.drawings.toModel()[0]?.anchors[0]?.to).toMatchObject({ row: 9, column: 4 });
   });
 
+  test('single-cell value edits preserve unrelated workbook, style and worksheet OOXML', async () => {
+    const input = await JSZip.loadAsync(await makeWorkbook());
+    const workbookXml = WORKBOOK_XML.replace(
+      '  <sheets>',
+      '  <bookViews><workbookView activeTab="0" showHorizontalScroll="1" showSheetTabs="1"/></bookViews>\n  <sheets>',
+    ).replace('</workbook>', '  <calcPr calcId="191029" fullCalcOnLoad="1"/>\n</workbook>');
+    const stylesXml = STYLES_XML.replace(
+      '</styleSheet>',
+      '  <tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/>\n  <colors><indexedColors><rgbColor rgb="FF010203"/></indexedColors></colors>\n</styleSheet>',
+    );
+    const sheetXml = SHEET_XML.replace(
+      '  <dimension ref="A1:D3"/>',
+      '  <sheetPr><outlinePr summaryBelow="1"/><pageSetUpPr fitToPage="1"/></sheetPr>\n  <dimension ref="A1:D3"/>\n  <sheetFormatPr baseColWidth="10" defaultRowHeight="15"/>',
+    )
+      .replace('<c r="B2"><v>2</v></c>', '<c r="B2" s="1"><v>2</v></c>')
+      .replace(
+        '</worksheet>',
+        '  <pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>\n</worksheet>',
+      );
+    input.file('xl/workbook.xml', workbookXml);
+    input.file('xl/styles.xml', stylesXml);
+    input.file('xl/worksheets/sheet1.xml', sheetXml);
+    const workbookRels = await input.file('xl/_rels/workbook.xml.rels')!.async('string');
+    const bytes = await input.generateAsync({ type: 'uint8array' });
+
+    const workbook = await ExcelWorkbook.fromZip(bytes);
+    workbook.worksheets
+      .getItem('Sheet1')
+      .getRange('B2')
+      .setValues([[0.8]]);
+    const outputBytes = await workbook.toZip();
+    const output = await JSZip.loadAsync(outputBytes);
+
+    expect(await output.file('xl/workbook.xml')!.async('string')).toBe(workbookXml);
+    expect(await output.file('xl/styles.xml')!.async('string')).toBe(stylesXml);
+    expect(await output.file('xl/_rels/workbook.xml.rels')!.async('string')).toBe(workbookRels);
+
+    const outputSheetXml = await output.file('xl/worksheets/sheet1.xml')!.async('string');
+    expect(outputSheetXml).toContain('<sheetPr>');
+    expect(outputSheetXml).toContain('<dimension ref="A1:D3"/>');
+    expect(outputSheetXml).toContain('<sheetFormatPr baseColWidth="10" defaultRowHeight="15"/>');
+    expect(outputSheetXml).toContain('<pageMargins left="0.7"');
+
+    const roundTripped = await ExcelWorkbook.fromZip(outputBytes);
+    const cell = roundTripped.worksheets.getItem('Sheet1').getCell('B2');
+    expect(cell.value()).toBe(0.8);
+    expect(cell.styleId()).toBe(1);
+
+    roundTripped.worksheets
+      .getItem('Sheet1')
+      .getRange('B2')
+      .setFormulas([['=A2*2']]);
+    const formulaBytes = await roundTripped.toZip();
+    const formulaOutput = await JSZip.loadAsync(formulaBytes);
+    expect(await formulaOutput.file('xl/workbook.xml')!.async('string')).toBe(workbookXml);
+    expect(await formulaOutput.file('xl/styles.xml')!.async('string')).toBe(stylesXml);
+    expect(await formulaOutput.file('xl/worksheets/sheet1.xml')!.async('string')).toContain(
+      '<sheetPr>',
+    );
+    const formulaRoundTrip = await ExcelWorkbook.fromZip(formulaBytes);
+    expect(formulaRoundTrip.worksheets.getItem('Sheet1').getCell('B2').formula()).toBe('A2*2');
+    expect(formulaRoundTrip.worksheets.getItem('Sheet1').getCell('B2').styleId()).toBe(1);
+  });
+
+  test.each(['shared', 'array', 'dataTable'] as const)(
+    'rejects a partial edit of an existing %s formula group',
+    async (formulaType) => {
+      const input = await JSZip.loadAsync(await makeWorkbook());
+      input.file(
+        'xl/worksheets/sheet1.xml',
+        SHEET_XML.replace('<f>A2*B2</f>', `<f t="${formulaType}" ref="C2:C3" si="0">A2*B2</f>`),
+      );
+      const workbook = await ExcelWorkbook.fromZip(
+        await input.generateAsync({ type: 'uint8array' }),
+      );
+      workbook.worksheets
+        .getItem('Sheet1')
+        .getRange('C2')
+        .setValues([[99]]);
+
+      await expect(workbook.toZip()).rejects.toThrow(
+        `does not support ${formulaType} formula cell Sheet1!C2`,
+      );
+    },
+  );
+
+  test('invalidates calcChain and requests full recalculation after a cell patch', async () => {
+    const input = await JSZip.loadAsync(await makeWorkbook());
+    input.file(
+      '[Content_Types].xml',
+      CT_XML.replace(
+        '</Types>',
+        '  <Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>\n</Types>',
+      ),
+    );
+    input.file(
+      'xl/_rels/workbook.xml.rels',
+      WORKBOOK_RELS.replace(
+        '</Relationships>',
+        '  <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>\n</Relationships>',
+      ),
+    );
+    input.file(
+      'xl/workbook.xml',
+      WORKBOOK_XML.replace('</workbook>', '  <calcPr calcId="191029"/>\n</workbook>'),
+    );
+    input.file(
+      'xl/calcChain.xml',
+      '<?xml version="1.0" encoding="UTF-8"?><calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><c r="C2" i="1"/></calcChain>',
+    );
+    const inputBytes = await input.generateAsync({ type: 'uint8array' });
+    const cleanWorkbook = await ExcelWorkbook.fromZip(inputBytes);
+    const cleanOutput = await JSZip.loadAsync(await cleanWorkbook.toZip());
+    expect(cleanOutput.file('xl/calcChain.xml')).not.toBeNull();
+    expect(await cleanOutput.file('xl/workbook.xml')!.async('string')).toBe(
+      await input.file('xl/workbook.xml')!.async('string'),
+    );
+
+    const workbook = await ExcelWorkbook.fromZip(inputBytes);
+    workbook.worksheets
+      .getItem('Sheet1')
+      .getRange('B2')
+      .setValues([[3]]);
+    const output = await JSZip.loadAsync(await workbook.toZip());
+
+    expect(output.file('xl/calcChain.xml')).toBeNull();
+    expect(await output.file('xl/_rels/workbook.xml.rels')!.async('string')).not.toContain(
+      '/calcChain',
+    );
+    expect(await output.file('[Content_Types].xml')!.async('string')).not.toContain(
+      '/xl/calcChain.xml',
+    );
+    const outputWorkbook = await output.file('xl/workbook.xml')!.async('string');
+    expect(outputWorkbook).toContain('calcId="191029"');
+    expect(outputWorkbook).toContain('fullCalcOnLoad="1"');
+    expect(outputWorkbook).toContain('forceFullCalc="1"');
+  });
+
+  test('keeps every unrelated worksheet byte-identical during a cell patch', async () => {
+    const input = await JSZip.loadAsync(await makeWorkbook());
+    const secondSheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetPr><outlinePr summaryBelow="0"/></sheetPr>
+  <dimension ref="A1"/>
+  <sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>untouched</t></is></c></row></sheetData>
+  <pageMargins left="1" right="1" top="1" bottom="1" header="0.5" footer="0.5"/>
+</worksheet>`;
+    input.file(
+      '[Content_Types].xml',
+      CT_XML.replace(
+        '</Types>',
+        '  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>\n</Types>',
+      ),
+    );
+    input.file(
+      'xl/_rels/workbook.xml.rels',
+      WORKBOOK_RELS.replace(
+        '</Relationships>',
+        '  <Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>\n</Relationships>',
+      ),
+    );
+    input.file(
+      'xl/workbook.xml',
+      WORKBOOK_XML.replace(
+        '  </sheets>',
+        '    <sheet name="Untouched" sheetId="2" r:id="rId8"/>\n  </sheets>',
+      ),
+    );
+    input.file('xl/worksheets/sheet2.xml', secondSheet);
+    const workbook = await ExcelWorkbook.fromZip(await input.generateAsync({ type: 'uint8array' }));
+    workbook.worksheets
+      .getItem('Sheet1')
+      .getRange('B2')
+      .setValues([[4]]);
+    const output = await JSZip.loadAsync(await workbook.toZip());
+
+    expect(await output.file('xl/worksheets/sheet2.xml')!.async('string')).toBe(secondSheet);
+  });
+
   test('drawing anchors and chart formula refs expose live writeback operations', async () => {
     const workbook = await ExcelWorkbook.fromZip(await makeWorkbook());
     const sheet = workbook.worksheets.getItem('Sheet1');
