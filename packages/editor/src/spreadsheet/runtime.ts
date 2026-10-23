@@ -31,6 +31,11 @@ import {
 } from './filter.js';
 import type { SpreadsheetRange, SpreadsheetSheetRenderModel } from './types.js';
 import type { SpreadsheetClipboardMerge } from './clipboard.js';
+import { EditorReadOnlyError } from '../read-only.js';
+
+export interface SpreadsheetEditorRuntimeOptions {
+  readOnly?: boolean;
+}
 
 export interface SpreadsheetEditorRuntimeState {
   workbook: ExcelWorkbook;
@@ -94,18 +99,22 @@ export class SpreadsheetEditorRuntime {
   private activeTransaction: ExcelTransactionBuilder | null = null;
   private activeTransactionSource: 'user' | 'agent' | null = null;
   private transactionNeedsRefresh = false;
+  private readOnlyValue: boolean;
 
-  private constructor(private state: SpreadsheetEditorRuntimeState) {}
+  private constructor(private state: SpreadsheetEditorRuntimeState, options: SpreadsheetEditorRuntimeOptions = {}) {
+    this.readOnlyValue = options.readOnly === true;
+  }
 
   static async fromZip(
     bytes: Uint8Array | ArrayBuffer,
-    options: ExcelWorkbookLoadOptions = {},
+    options: ExcelWorkbookLoadOptions & SpreadsheetEditorRuntimeOptions = {},
   ): Promise<SpreadsheetEditorRuntime> {
-    const workbook = await ExcelWorkbook.fromZip(bytes, options);
-    return SpreadsheetEditorRuntime.fromWorkbook(workbook);
+    const { readOnly, ...loadOptions } = options;
+    const workbook = await ExcelWorkbook.fromZip(bytes, loadOptions);
+    return SpreadsheetEditorRuntime.fromWorkbook(workbook, { readOnly });
   }
 
-  static async fromWorkbook(workbook: ExcelWorkbook): Promise<SpreadsheetEditorRuntime> {
+  static async fromWorkbook(workbook: ExcelWorkbook, options: SpreadsheetEditorRuntimeOptions = {}): Promise<SpreadsheetEditorRuntime> {
     const model = await workbook.toModel();
     const firstSheet = model.sheets[0];
     if (!firstSheet) throw new Error('SpreadsheetEditorRuntime: workbook has no sheets');
@@ -118,10 +127,20 @@ export class SpreadsheetEditorRuntime {
       formulaResults,
       formulaEngine,
       activeSheet: buildSpreadsheetSheetRenderModel(firstSheet, model.styles, { formulaResults }),
-    });
+    }, options);
+  }
+
+  isReadOnly(): boolean {
+    return this.readOnlyValue;
+  }
+
+  setReadOnly(readOnly: boolean): void {
+    if (this.activeTransaction) throw new Error('SpreadsheetEditorRuntime: cannot change read-only state during a transaction');
+    this.readOnlyValue = readOnly;
   }
 
   workbook(): ExcelWorkbook {
+    this.assertWritable();
     return this.state.workbook;
   }
 
@@ -138,14 +157,15 @@ export class SpreadsheetEditorRuntime {
   }
 
   canUndo(): boolean {
-    return this.state.workbook.history().canUndo();
+    return !this.readOnlyValue && this.state.workbook.history().canUndo();
   }
 
   canRedo(): boolean {
-    return this.state.workbook.history().canRedo();
+    return !this.readOnlyValue && this.state.workbook.history().canRedo();
   }
 
   async undo(): Promise<ExcelHistoryApplyResult | null> {
+    this.assertWritable();
     const result = await this.state.workbook.history().undo();
     if (!result) return null;
     await this.refresh();
@@ -153,6 +173,7 @@ export class SpreadsheetEditorRuntime {
   }
 
   async redo(): Promise<ExcelHistoryApplyResult | null> {
+    this.assertWritable();
     const result = await this.state.workbook.history().redo();
     if (!result) return null;
     await this.refresh();
@@ -163,6 +184,7 @@ export class SpreadsheetEditorRuntime {
     options: SpreadsheetUserTransactionOptions,
     run: () => Promise<void>,
   ): Promise<ExcelHistoryApplyResult | null> {
+    this.assertWritable();
     return this.runScopedTransaction(
       'user',
       (apply) => this.state.workbook.history().runGroup({ ...options, source: 'user' }, apply),
@@ -174,6 +196,7 @@ export class SpreadsheetEditorRuntime {
     options: ExcelAgentTransactionGroupOptions,
     run: SpreadsheetAgentTransactionRunner,
   ): Promise<ExcelHistoryApplyResult | null> {
+    this.assertWritable();
     return this.runScopedTransaction(
       'agent',
       (apply) => this.state.workbook.history().runAgentGroup(options, apply),
@@ -898,6 +921,7 @@ export class SpreadsheetEditorRuntime {
     options: SpreadsheetUserTransactionOptions,
     mutate: (transaction: ExcelTransactionBuilder) => Promise<void>,
   ): Promise<void> {
+    this.assertWritable();
     if (this.activeTransaction) {
       await mutate(this.activeTransaction);
       this.transactionNeedsRefresh = true;
@@ -918,6 +942,7 @@ export class SpreadsheetEditorRuntime {
     recordAgentMutation: (transaction: ExcelTransactionBuilder) => Promise<void>,
     mutate: () => Promise<void>,
   ): Promise<void> {
+    this.assertWritable();
     if (this.activeTransactionSource === 'agent' && this.activeTransaction) {
       await recordAgentMutation(this.activeTransaction);
       this.transactionNeedsRefresh = true;
@@ -942,6 +967,7 @@ export class SpreadsheetEditorRuntime {
     execute: (run: (transaction: ExcelTransactionBuilder) => Promise<void>) => Promise<ExcelHistoryApplyResult | null>,
     run: () => Promise<void>,
   ): Promise<ExcelHistoryApplyResult | null> {
+    this.assertWritable();
     if (this.activeTransaction) {
       await run();
       this.transactionNeedsRefresh = true;
@@ -969,6 +995,10 @@ export class SpreadsheetEditorRuntime {
       this.activeTransactionSource = null;
       this.transactionNeedsRefresh = previousNeedsRefresh;
     }
+  }
+
+  private assertWritable(): void {
+    if (this.readOnlyValue) throw new EditorReadOnlyError('spreadsheet');
   }
 
   private cellEditHistoryGroup(

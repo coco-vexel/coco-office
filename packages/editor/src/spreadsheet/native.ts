@@ -45,6 +45,7 @@ import type {
   SpreadsheetScrollState,
   SpreadsheetViewport,
 } from './types.js';
+import { EditorReadOnlyError } from '../read-only.js';
 
 export interface SpreadsheetEditorChangeEvent {
   kind: 'workbookChange';
@@ -77,6 +78,8 @@ export interface SpreadsheetEditorCellState {
 
 export interface SpreadsheetEditorOptions {
   workbookId?: string;
+  /** Allows navigation, selection and copy while blocking every workbook mutation. */
+  readOnly?: boolean;
   onChange?: (event: SpreadsheetEditorChangeEvent) => void | Promise<void>;
   showSheetTabs?: boolean;
   /** Isolates editor internals from host-page CSS. Shadow DOM is enabled by default. */
@@ -87,6 +90,8 @@ export interface SpreadsheetEditorOptions {
 
 export interface SpreadsheetEditor {
   runtime(): SpreadsheetEditorRuntime;
+  isReadOnly(): boolean;
+  setReadOnly(readOnly: boolean): void;
   selection(): SpreadsheetSelectionState;
   cellState(address: string): SpreadsheetEditorCellState;
   freezeState(): SpreadsheetFreezeState;
@@ -194,8 +199,10 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   private lastStateKey = '';
   private transactionDepth = 0;
   private transactionChanged = false;
+  private readOnlyValue: boolean;
 
   constructor(private readonly host: HTMLElement, private readonly options: SpreadsheetEditorOptions) {
+    this.readOnlyValue = options.readOnly === true;
     host.replaceChildren();
     this.renderRoot = options.styleIsolation === 'none'
       ? host
@@ -317,6 +324,26 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   runtime(): SpreadsheetEditorRuntime {
     if (!this.runtimeValue) throw new Error('SpreadsheetEditor: workbook is not loaded');
     return this.runtimeValue;
+  }
+
+  isReadOnly(): boolean {
+    return this.readOnlyValue;
+  }
+
+  setReadOnly(readOnly: boolean): void {
+    if (this.disposed || this.isReadOnly() === readOnly) return;
+    this.cellEditor.cancel();
+    this.resizeDrag = null;
+    this.autoFillDrag = null;
+    this.chartDrag = null;
+    this.selecting = false;
+    this.hideResizeGuide();
+    this.hideContextMenu();
+    this.hideFilterMenu();
+    this.runtime().setReadOnly(readOnly);
+    this.readOnlyValue = readOnly;
+    this.host.setAttribute('aria-readonly', String(readOnly));
+    this.render();
   }
 
   selection(): SpreadsheetSelectionState {
@@ -507,7 +534,9 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.runtimeValue = await SpreadsheetEditorRuntime.fromZip(bytes, {
       workbookId: this.options.workbookId,
       mode: 'inline',
+      readOnly: this.readOnlyValue,
     });
+    this.host.setAttribute('aria-readonly', String(this.isReadOnly()));
     this.renderTabs();
     this.render();
   }
@@ -607,15 +636,16 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       this.scroll,
     );
     renderer.resize(width, height);
-    renderer.setHeaderFiltersEnabled(this.options.enableHeaderFilters === true);
-    renderer.setHeaderFilterColumns(this.options.enableHeaderFilters === true
+    const headerFiltersEnabled = this.options.enableHeaderFilters === true && !this.isReadOnly();
+    renderer.setHeaderFiltersEnabled(headerFiltersEnabled);
+    renderer.setHeaderFilterColumns(headerFiltersEnabled
       ? Array.from({ length: layout.columnCount }, (_, index) => index + 1)
       : null);
     renderer.setActiveHeaderFilterColumns(Array.from(this.columnFilters.keys()));
     renderer.render(layout, viewport);
     const selectionRange = normalizeSelectionRange(this.selectionState.range);
     renderer.renderSelection(layout, viewport, selectionRange, {
-      showFillHandle: supportsSpreadsheetAutoFill(runtime.activeSheet(), selectionRange),
+      showFillHandle: !this.isReadOnly() && supportsSpreadsheetAutoFill(runtime.activeSheet(), selectionRange),
     });
     this.updateCellEditorPosition();
     if (this.autoFillDrag?.preview) {
@@ -672,7 +702,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
           textAlign: 'center',
           font: '13px Arial, sans-serif',
           lineHeight: '1.4',
-          cursor: this.chartDrag?.chartIndex === chartIndex ? 'grabbing' : 'move',
+          cursor: this.isReadOnly() ? 'default' : this.chartDrag?.chartIndex === chartIndex ? 'grabbing' : 'move',
           border: this.selectedChartIndex === chartIndex ? '2px solid #2563eb' : '1px dashed #94a3b8',
           boxShadow: this.selectedChartIndex === chartIndex ? '0 0 0 1px rgba(37, 99, 235, 0.18)' : 'none',
         });
@@ -708,6 +738,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     const hit = this.viewport.hitTest(this.eventPoint(event));
     if (hit.kind !== 'cell' && hit.kind !== 'rowHeader' && hit.kind !== 'columnHeader') return;
     if (hit.kind === 'cell' && hit.row === 1 && this.isFilterIconHit(hit.column, event)) {
+      if (this.isReadOnly()) return;
       this.openFilterMenu(hit.column, event.clientX, event.clientY);
       event.preventDefault();
       return;
@@ -724,6 +755,10 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   };
 
   private readonly handleFilterMenuClick = (event: MouseEvent): void => {
+    if (this.isReadOnly()) {
+      this.hideFilterMenu();
+      return;
+    }
     const target = event.target as HTMLElement;
     const action = target.closest<HTMLButtonElement>('[data-filter-action]')?.dataset.filterAction;
     if (!action || this.filterMenuColumn === null) return;
@@ -748,6 +783,10 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     const hit = this.viewport.hitTest(this.eventPoint(event));
     if (hit.kind !== 'cell') return;
     this.selectionState = expandSelectionForMergedRanges(createSelection(hit.row, hit.column), this.runtime().activeSheet());
+    if (this.isReadOnly()) {
+      this.render();
+      return;
+    }
     this.openCellEditor();
     event.preventDefault();
   };
@@ -762,6 +801,11 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     const chartHit = this.chartAtPoint(point);
     if (chartHit) {
       this.selectedChartIndex = chartHit.chartIndex;
+      if (this.isReadOnly()) {
+        this.render();
+        event.preventDefault();
+        return;
+      }
       this.chartDrag = {
         chartIndex: chartHit.chartIndex,
         pointer: point,
@@ -775,7 +819,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     }
     this.selectedChartIndex = null;
     const resizeHandle = hitSpreadsheetResizeHandle(this.layout, this.viewport.viewports, point);
-    if (resizeHandle) {
+    if (resizeHandle && !this.isReadOnly()) {
       this.resizeDrag = startSpreadsheetResizeDrag(resizeHandle, event);
       this.host.setPointerCapture(event.pointerId);
       this.host.style.cursor = resizeHandle.kind === 'column' ? 'col-resize' : 'row-resize';
@@ -785,7 +829,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     }
     const selectionRange = normalizeSelectionRange(this.selectionState.range);
     const fillHandle = this.renderer?.fillHandleRect(this.layout, this.viewport, selectionRange);
-    if (fillHandle && containsPoint(fillHandle, point) && supportsSpreadsheetAutoFill(this.runtime().activeSheet(), selectionRange)) {
+    if (!this.isReadOnly() && fillHandle && containsPoint(fillHandle, point) && supportsSpreadsheetAutoFill(this.runtime().activeSheet(), selectionRange)) {
       this.autoFillDrag = { source: selectionRange, preview: null };
       this.host.setPointerCapture(event.pointerId);
       event.preventDefault();
@@ -824,7 +868,9 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       return;
     }
     if (!this.resizeDrag && !this.autoFillDrag && !this.selecting && !this.editingCell) {
-      const resizeHandle = hitSpreadsheetResizeHandle(this.layout, this.viewport.viewports, this.eventPoint(event));
+      const resizeHandle = this.isReadOnly()
+        ? null
+        : hitSpreadsheetResizeHandle(this.layout, this.viewport.viewports, this.eventPoint(event));
       this.host.style.cursor = resizeHandle
         ? resizeHandle.kind === 'column' ? 'col-resize' : 'row-resize'
         : '';
@@ -977,6 +1023,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     if (this.editingCell) return;
     const { row, column } = this.selectionState.active;
     if (event.key === 'F2' || event.key === 'Enter') {
+      if (this.isReadOnly()) return;
       event.preventDefault();
       this.openCellEditor();
       return;
@@ -1005,6 +1052,10 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   };
 
   private readonly handlePaste = (event: ClipboardEvent): void => {
+    if (this.isReadOnly()) {
+      event.preventDefault();
+      return;
+    }
     const text = event.clipboardData?.getData('text/plain') ?? '';
     if (!text) return;
     event.preventDefault();
@@ -1049,7 +1100,11 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     }
     if (hit.kind !== 'cell' && hit.kind !== 'rowHeader' && hit.kind !== 'columnHeader') return;
     event.preventDefault();
-    this.renderContextMenu(event.clientX, event.clientY, hit.kind === 'columnHeader' ? hit.column : undefined);
+    this.renderContextMenu(
+      event.clientX,
+      event.clientY,
+      this.isReadOnly() ? undefined : hit.kind === 'columnHeader' ? hit.column : undefined,
+    );
   };
 
   private readonly handleDocumentPointerDown = (event: PointerEvent): void => {
@@ -1060,23 +1115,26 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   };
 
   private renderContextMenu(x: number, y: number, columnHeader?: number): void {
-    const items: Array<{ label: string; disabled?: boolean; action: () => void | Promise<void> }> = [
-      { label: 'Undo', disabled: !this.canUndo(), action: () => this.undo() },
-      { label: 'Redo', disabled: !this.canRedo(), action: () => this.redo() },
-      { label: 'Copy', action: () => this.copySelection() },
-      { label: 'Paste', action: () => this.pasteFromClipboard() },
-      { label: 'Clear cells', action: () => this.clearSelection() },
-      { label: 'Clear format', action: () => this.clearSelectionFormat() },
-      { label: 'Bold', action: () => this.applyFormat('bold') },
-      { label: 'Italic', action: () => this.applyFormat('italic') },
-      { label: 'Underline', action: () => this.applyFormat('underline') },
-      { label: 'Align left', action: () => this.applyAlignment('left') },
-      { label: 'Align center', action: () => this.applyAlignment('center') },
-      { label: 'Align right', action: () => this.applyAlignment('right') },
-      { label: 'Merge cells', action: () => this.mergeSelection() },
-      { label: 'Unmerge cells', action: () => this.unmergeSelection() },
-      { label: 'Freeze above and left', action: () => this.freezeSelection() },
-    ];
+    const items: Array<{ label: string; disabled?: boolean; action: () => void | Promise<void> }> =
+      this.isReadOnly()
+        ? [{ label: 'Copy', action: () => this.copySelection() }]
+        : [
+          { label: 'Undo', disabled: !this.canUndo(), action: () => this.undo() },
+          { label: 'Redo', disabled: !this.canRedo(), action: () => this.redo() },
+          { label: 'Copy', action: () => this.copySelection() },
+          { label: 'Paste', action: () => this.pasteFromClipboard() },
+          { label: 'Clear cells', action: () => this.clearSelection() },
+          { label: 'Clear format', action: () => this.clearSelectionFormat() },
+          { label: 'Bold', action: () => this.applyFormat('bold') },
+          { label: 'Italic', action: () => this.applyFormat('italic') },
+          { label: 'Underline', action: () => this.applyFormat('underline') },
+          { label: 'Align left', action: () => this.applyAlignment('left') },
+          { label: 'Align center', action: () => this.applyAlignment('center') },
+          { label: 'Align right', action: () => this.applyAlignment('right') },
+          { label: 'Merge cells', action: () => this.mergeSelection() },
+          { label: 'Unmerge cells', action: () => this.unmergeSelection() },
+          { label: 'Freeze above and left', action: () => this.freezeSelection() },
+        ];
     if (columnHeader !== undefined) {
       items.unshift({
         label: 'Filter column',
@@ -1186,6 +1244,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async filterColumn(column: number, values: readonly string[] | null): Promise<void> {
+    this.assertWritable();
     if (values === null) this.columnFilters.delete(column);
     else this.columnFilters.set(column, [...values]);
     await this.applyColumnFilters();
@@ -1297,6 +1356,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   private openCellEditor(): void {
+    if (this.isReadOnly()) return;
     if (!this.layout || !this.viewport) return;
     const cell = this.selectionState.active;
     const viewport = this.viewport.findViewport({
@@ -1337,6 +1397,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.editingCellStyle = null;
     this.formulaReferenceRanges = [];
     if (!cell) return;
+    this.assertWritable();
     const address = formatCellAddress(cell.row, cell.column);
     if (value.startsWith('=')) await this.runtime().setCellFormula(address, value.slice(1), { mergeUndo: true });
     else await this.runtime().setCellValue(address, coerceEditorValue(value), { mergeUndo: true });
@@ -1347,6 +1408,10 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   private eventPoint(event: MouseEvent): { x: number; y: number } {
     const rect = this.host.getBoundingClientRect();
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  }
+
+  private assertWritable(): void {
+    if (this.isReadOnly()) throw new EditorReadOnlyError('spreadsheet');
   }
 
   private eventPathContains(event: Event, node: EventTarget): boolean {

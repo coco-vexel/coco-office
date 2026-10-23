@@ -201,6 +201,28 @@ describe('native runtime history integration', () => {
     host.remove();
   });
 
+  test('keeps selection available while blocking every mutation in read-only mode', () => {
+    editor.setReadOnly(true);
+    const before = editor.getDocument().blocks;
+
+    expect(editor.isReadOnly()).toBe(true);
+    expect(editor.setSelection({ kind: 'text-range', anchor: { paraId: 'P1', offset: 0 }, focus: { paraId: 'P1', offset: 5 } })).toBe(true);
+    expect(editor.dispatch({ kind: 'insert-text', text: 'blocked' })).toBe(false);
+    expect(editor.replaceCurrent('blocked')).toBe(false);
+    expect(editor.canDispatch({ kind: 'insert-page-break' })).toBe(false);
+    expect(editor.canUndo()).toBe(false);
+    expect(host.querySelector('[contenteditable="true"]')).toBeNull();
+    expect(editor.getDocument().blocks).toEqual(before);
+
+    const beforeInput = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: 'x' });
+    host.dispatchEvent(beforeInput);
+    expect(beforeInput.defaultPrevented).toBe(true);
+
+    editor.setReadOnly(false);
+    expect(editor.setSelection({ kind: 'caret', paraId: 'P1', offset: 5 })).toBe(true);
+    expect(editor.dispatch({ kind: 'insert-text', text: '!' })).toBe(true);
+  });
+
   test('round-trips a page break through undo and redo', () => {
     expect(editor.setSelection({ kind: 'caret', paraId: 'P1', offset: 2 })).toBe(true);
     expect(editor.dispatch({ kind: 'insert-page-break' })).toBe(true);

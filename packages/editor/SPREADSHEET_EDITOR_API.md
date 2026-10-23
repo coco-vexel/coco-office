@@ -17,6 +17,8 @@ import {
 
 const editor: SpreadsheetEditor = await renderSpreadsheetEditor(host, bytes, {
   workbookId: documentId,
+  // Set true for preview while preserving scroll, selection, copy and sheet tabs.
+  readOnly: false,
   showSheetTabs: true,
   // Isolate editor internals from host-page CSS.
   styleIsolation: 'shadow',
@@ -27,6 +29,11 @@ const editor: SpreadsheetEditor = await renderSpreadsheetEditor(host, bytes, {
   },
 });
 ```
+
+Use `editor.setReadOnly(true)` to switch an existing instance into preview
+mode. Mutation methods and direct mutation calls through `editor.runtime()`
+reject with `EditorReadOnlyError`; `setActiveSheet()`, selection, scrolling,
+copy and export remain available.
 
 The host should keep the returned instance until the document is closed, then
 call `editor.destroy()`. Replacing a document uses `loadWorkbook()` on the same

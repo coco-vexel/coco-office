@@ -240,6 +240,7 @@ export function renderNativeWordEditor(
   let sourceView = initialView;
   let doc = createNativeWordDocument(sourceView);
   let destroyed = false;
+  let readOnly = options.readOnly === true;
   const changes: NativeWordChange[] = [];
   let emittedChanges: NativeWordChange[] = [];
   let revision = 0;
@@ -464,6 +465,10 @@ export function renderNativeWordEditor(
     imageResizeHandle.style.top = `${imageRect.bottom - hostRect.top + host.scrollTop - 6}px`;
   };
   const showImageResizeHandle = () => {
+    if (readOnly) {
+      removeImageResizeHandle();
+      return;
+    }
     if (!selectedImage) {
       removeImageResizeHandle();
       return;
@@ -549,6 +554,16 @@ export function renderNativeWordEditor(
   window.addEventListener('resize', repositionSelectedImageHandle);
   document.addEventListener('scroll', repositionSelectedImageHandle, true);
 
+  const applyReadOnlyDom = () => {
+    outerHost.setAttribute('aria-readonly', String(readOnly));
+    host.dataset.readOnly = String(readOnly);
+    if (!readOnly) return;
+    for (const element of Array.from(host.querySelectorAll<HTMLElement>('[contenteditable="true"]'))) {
+      element.contentEditable = 'false';
+    }
+    removeImageResizeHandle();
+  };
+
   const render = (cursor?: NativeCursorPoint, preservedSelection?: WordEditorSelection) => {
     if (deferredRenderTimer !== null) {
       window.clearTimeout(deferredRenderTimer);
@@ -562,6 +577,7 @@ export function renderNativeWordEditor(
     const rendered = renderNativeDocument(doc);
     host.replaceChildren(rendered);
     paginateNativeDocument(rendered, doc);
+    applyReadOnlyDom();
     observeNativeTableSizes(rendered);
     const tableSelection = preservedSelection?.kind === 'table-cell-range'
       ? preservedSelection
@@ -593,6 +609,7 @@ export function renderNativeWordEditor(
     for (const current of replacements) {
       current.replaceWith(renderNativeParagraph(paragraph));
     }
+    applyReadOnlyDom();
     const root = host.querySelector<HTMLElement>(':scope > coco-word-native-document') ?? host.querySelector<HTMLElement>('coco-word-native-document');
     if (root) refreshNativePageCommentBubbles(root);
     if (selectedImage) showImageResizeHandle();
@@ -927,6 +944,10 @@ export function renderNativeWordEditor(
   };
 
   const compositionStart = (event: CompositionEvent) => {
+    if (readOnly) {
+      event.preventDefault();
+      return;
+    }
     compositionActive = true;
     if (compositionFinalizeTimer !== null) {
       window.clearTimeout(compositionFinalizeTimer);
@@ -1909,13 +1930,13 @@ export function renderNativeWordEditor(
   };
 
   const undo = (): boolean => {
-    if (destroyed || browserUndoStack.length === 0) return false;
+    if (destroyed || readOnly || browserUndoStack.length === 0) return false;
     activate();
     return applyBrowserUndoFallback();
   };
 
   const redo = (): boolean => {
-    if (destroyed || browserRedoStack.length === 0) return false;
+    if (destroyed || readOnly || browserRedoStack.length === 0) return false;
     activate();
     return applyBrowserRedoFallback();
   };
@@ -2651,16 +2672,18 @@ export function renderNativeWordEditor(
   };
 
   const replaceCurrent = (replacement: string): boolean => {
+    if (readOnly) return false;
     const match = searchState && searchState.activeIndex >= 0 ? searchState.matches[searchState.activeIndex] : null;
     return match ? applySearchReplacement([match], replacement) > 0 : false;
   };
 
   const replaceAll = (replacement: string): number => {
+    if (readOnly) return 0;
     return searchState ? applySearchReplacement(searchState.matches, replacement) : 0;
   };
 
   const dispatch = (command: WordEditorCommand): boolean => {
-    if (destroyed) return false;
+    if (destroyed || readOnly) return false;
     activate();
     const current = selection ?? currentNativeSelection(host) ?? nativeSelectionFromCursor(host);
     if (command.kind === 'toggle-track-revisions') {
@@ -3579,6 +3602,10 @@ export function renderNativeWordEditor(
   };
 
   const cut = (event: ClipboardEvent) => {
+    if (readOnly) {
+      copy(event);
+      return;
+    }
     if (selectedImage && event.clipboardData) {
       const imageSelection = selectedImage;
       const image = findNativeParagraph(doc, imageSelection.paraId)?.content.find(
@@ -3647,6 +3674,10 @@ export function renderNativeWordEditor(
   };
 
   const paste = (event: ClipboardEvent) => {
+    if (readOnly) {
+      event.preventDefault();
+      return;
+    }
     const tableSelection = selection?.kind === 'table-cell-range' ? selection : null;
     if (tableSelection) {
       const rich = parseRichTableClipboard(event);
@@ -4021,6 +4052,7 @@ export function renderNativeWordEditor(
   };
 
   const contextMenu = (event: MouseEvent) => {
+    if (readOnly) return;
     if (options.contextMenu === false) return;
     event.preventDefault();
     event.stopPropagation();
@@ -4070,6 +4102,10 @@ export function renderNativeWordEditor(
   };
 
   const beforeInput = (event: InputEvent) => {
+    if (readOnly) {
+      event.preventDefault();
+      return;
+    }
     if (event.inputType === suppressedBrowserHistoryInput) {
       event.preventDefault();
       suppressedBrowserHistoryInput = null;
@@ -4317,6 +4353,16 @@ export function renderNativeWordEditor(
       });
       return;
     }
+    if (readOnly) {
+      const isHistory =
+        (event.ctrlKey || event.metaKey) &&
+        (event.key.toLowerCase() === 'z' || event.key.toLowerCase() === 'y');
+      if (isHistory) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
     const isUndo = (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'z';
     const isRedo =
       ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'z') ||
@@ -4464,6 +4510,11 @@ export function renderNativeWordEditor(
       event.composedPath().includes(host) ||
       activeNativeWordHostByDocument.get(document) !== host
     ) {
+      return;
+    }
+    if (readOnly) {
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
     if (event.inputType === 'historyUndo' && undo()) {
@@ -4667,6 +4718,7 @@ export function renderNativeWordEditor(
     }
     const hyperlink = target instanceof Element ? target.closest<HTMLAnchorElement>('a.coco-word-hyperlink') : null;
     if (hyperlink) {
+      if (readOnly) return;
       event.preventDefault();
       if ((event.ctrlKey || event.metaKey) && safeExternalHyperlink(hyperlink.dataset.hyperlinkTarget)) {
         window.open(hyperlink.dataset.hyperlinkTarget, '_blank', 'noopener,noreferrer');
@@ -4881,6 +4933,9 @@ export function renderNativeWordEditor(
     preserveSelectionFromExternalPointer(event as PointerEvent);
     window.setTimeout(() => renderPreservedSelectionHighlight(true), 0);
   };
+  const drop = (event: DragEvent) => {
+    if (readOnly) event.preventDefault();
+  };
   const updateHyperlinkNavigationMode = (event: KeyboardEvent) => {
     host.classList.toggle('is-hyperlink-navigation-mode', event.ctrlKey || event.metaKey);
   };
@@ -4889,6 +4944,7 @@ export function renderNativeWordEditor(
   };
 
   const input = (event: Event) => {
+    if (readOnly) return;
     const inputEvent = event as InputEvent;
     if (inputEvent.inputType === suppressedBrowserHistoryInput) {
       suppressedBrowserHistoryInput = null;
@@ -5022,6 +5078,7 @@ export function renderNativeWordEditor(
   host.addEventListener('copy', copy);
   host.addEventListener('cut', cut);
   host.addEventListener('paste', paste);
+  host.addEventListener('drop', drop);
   host.addEventListener('keydown', keyDown);
   host.addEventListener('mousedown', mouseDown);
   host.addEventListener('click', click);
@@ -5051,6 +5108,23 @@ export function renderNativeWordEditor(
     get destroyed() {
       return destroyed;
     },
+    isReadOnly() {
+      return readOnly;
+    },
+    setReadOnly(next) {
+      if (destroyed || readOnly === next) return;
+      readOnly = next;
+      closeContextMenu();
+      if (readOnly) {
+        cancelImageResizeDrag?.();
+        cancelImageResizeDrag = null;
+        pendingBrowserRangeDelete = null;
+        pendingCompositionTransaction = null;
+        activeLocalTypingTransaction = null;
+        compositionActive = false;
+      }
+      render(undefined, selection ?? undefined);
+    },
     destroy() {
       if (destroyed) return;
       destroyed = true;
@@ -5060,6 +5134,7 @@ export function renderNativeWordEditor(
       host.removeEventListener('copy', copy);
       host.removeEventListener('cut', cut);
       host.removeEventListener('paste', paste);
+      host.removeEventListener('drop', drop);
       host.removeEventListener('keydown', keyDown);
       host.removeEventListener('mousedown', mouseDown);
       host.removeEventListener('click', click);
@@ -5168,15 +5243,15 @@ export function renderNativeWordEditor(
       return changes.slice();
     },
     canUndo() {
-      return !destroyed && browserUndoStack.length > 0;
+      return !destroyed && !readOnly && browserUndoStack.length > 0;
     },
     canRedo() {
-      return !destroyed && browserRedoStack.length > 0;
+      return !destroyed && !readOnly && browserRedoStack.length > 0;
     },
     undo,
     redo,
     canDispatch(command) {
-      if (destroyed) return false;
+      if (destroyed || readOnly) return false;
       const current = selection ?? currentNativeSelection(host) ?? nativeSelectionFromCursor(host);
       return canDispatchNativeWordCommand(doc, current, command);
     },

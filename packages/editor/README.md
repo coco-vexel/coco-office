@@ -38,7 +38,10 @@ Create `index.html`:
 Create `main.js`, then run `npx vite` and open the printed HTTP URL:
 
 ```js
-import { buildPptEditorViewFromPptx, renderNativePptEditor } from '@coco-vexel/coco-office-editor/ppt';
+import {
+  buildPptEditorViewFromPptx,
+  renderNativePptEditor,
+} from '@coco-vexel/coco-office-editor/ppt';
 
 const input = document.querySelector('#file');
 const save = document.querySelector('#save');
@@ -102,6 +105,33 @@ This is an unstyled integration shell; the native PPT renderer supplies its edit
 
 All import paths above start with `@coco-vexel/coco-office-editor`. If your app directly imports Core (for example to apply Word changes), declare it explicitly with `npm install @coco-vexel/coco-office`. Examples below named `host`, `xlsxBytes` or `persistWorkbook` are integration fragments: supply your own mount, file bytes and persistence callback.
 
+### Read-only preview
+
+All three native editors accept `readOnly: true` at mount time and expose
+`isReadOnly()` / `setReadOnly(readOnly)`. Read-only mode is enforced by the
+Word runtime, spreadsheet runtime, and PPT session as well as their DOM event
+handlers. Programmatic spreadsheet and PPT mutations reject with
+`EditorReadOnlyError` (`code: 'EDITOR_READ_ONLY'`); Word's synchronous command
+contract reports the same condition through `canDispatch() === false` and
+`dispatch() === false`.
+
+Read-only preview intentionally keeps scrolling, zoom owned by the host,
+selection/copy, links, worksheet switching, and slide navigation available.
+It blocks typing, IME, cut/paste/drop, formatting, structure changes,
+drag/resize, undo/redo, and mutation APIs. Navigation and selection do not emit
+change events or advance revisions. Spreadsheet sort/filter/freeze operations
+remain blocked because they currently modify the workbook rather than a
+separate view state.
+
+PPT hosts that render their own navigator can also pass `showSlideList: false`:
+
+```ts
+const preview = renderNativePptEditor(host, view, {
+  readOnly: true,
+  showSlideList: false,
+});
+```
+
 Word custom Shadow DOM integration needs stylesheet text via `styleText`; Vite supports `@coco-vexel/coco-office-editor/styles.css?inline`. Other bundlers must provide an equivalent CSS-string loader. The `?inline` suffix is a Vite feature, not a portable JavaScript import. Spreadsheet's default isolated renderer and the default PPT renderer manage their surfaces. Use a mount with an explicit nonzero height.
 
 The complete three-format file/open/edit/export flow, including Word export diagnostics, is in the [public demo source](https://github.com/coco-vexel/coco-office/blob/main/packages/editor/demo/main.js). No private product dependency is needed. These editors are experimental; file round-trip success does not certify visual parity or support for every advanced object.
@@ -159,6 +189,7 @@ import '@coco-vexel/coco-office-editor/styles.css';
 
 const documentView = await buildWordEditorViewFromDocx(docxBytes);
 const editor = renderNativeWordEditor(host, documentView, {
+  readOnly: false,
   contextMenu: true,
   // Pass the bundled editor CSS text when the host uses Shadow DOM isolation.
   // Vite hosts can load it with: import editorStyles from '../styles/editor.css?inline';
@@ -297,6 +328,7 @@ import { renderSpreadsheetEditor } from '@coco-vexel/coco-office-editor/spreadsh
 
 const editor = await renderSpreadsheetEditor(host, xlsxBytes, {
   workbookId: 'browser-document.xlsx',
+  readOnly: false,
   showSheetTabs: true,
   // Shadow DOM isolation is enabled by default; use 'none' only for legacy hosts.
   styleIsolation: 'shadow',

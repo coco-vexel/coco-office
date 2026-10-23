@@ -8,7 +8,7 @@ import { renderNativePptEditor } from '../native.js';
 import { buildPptPresentationScene, type PptSceneNode, type PptSlideScene } from '../scene.js';
 import { buildPptEditorViewFromModel, buildPptEditorViewFromPptx } from '../view.js';
 
-async function buildEditorHost() {
+async function buildEditorHost(options: Parameters<typeof renderNativePptEditor>[2] = {}) {
   const host = document.createElement('div');
   document.body.append(host);
   const view = await buildPptEditorViewFromModel({
@@ -30,7 +30,7 @@ async function buildEditorHost() {
       },
     ],
   });
-  const editor = renderNativePptEditor(host, view);
+  const editor = renderNativePptEditor(host, view, options);
   return { editor, root: host.shadowRoot! };
 }
 
@@ -82,6 +82,27 @@ function waitForNextChange(editor: ReturnType<typeof renderNativePptEditor>): Pr
     });
   });
 }
+
+test('supports a navigable read-only preview without the built-in slide list', async () => {
+  const { editor, root } = await buildEditorHost({ readOnly: true, showSlideList: false });
+  const shell = root.querySelector<HTMLElement>('.coco-ppt-editor')!;
+  const node = root.querySelector<HTMLElement>('.coco-ppt-node')!;
+
+  expect(editor.isReadOnly()).toBe(true);
+  expect(shell.dataset.showSlideList).toBe('false');
+  expect(shell.dataset.readOnly).toBe('true');
+  await editor.dispatch({ kind: 'select-shape', slideIdOrIndex: 0, shapeIdOrName: 'Title' });
+  expect(editor.selection()).toMatchObject({ kind: 'shape', shapeId: '2' });
+  await expect(editor.dispatch({ kind: 'set-shape-text', slideIdOrIndex: 0, shapeIdOrName: 'Title', text: 'blocked' }))
+    .rejects.toMatchObject({ code: 'EDITOR_READ_ONLY' });
+  node.dispatchEvent(mouse('dblclick', 10, 10));
+  expect(root.querySelector('[contenteditable="true"]')).toBeNull();
+  expect(editor.session().revision()).toBe(0);
+
+  editor.setReadOnly(false);
+  expect(editor.isReadOnly()).toBe(false);
+  await editor.destroy();
+});
 
 function testThumbnailFingerprint(slide: PptSlideScene): string {
   return JSON.stringify({

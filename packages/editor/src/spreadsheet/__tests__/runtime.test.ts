@@ -6,6 +6,31 @@ import { buildSpreadsheetSheetRenderModel } from '../render-model.js';
 import { resolveSpreadsheetRangeBorder } from '../style-resolver.js';
 
 describe('spreadsheet runtime', () => {
+  test('allows sheet navigation but rejects workbook mutations in read-only mode', async () => {
+    const source = model();
+    source.sheets.push({ ...structuredClone(source.sheets[0]!), id: '2', name: 'Summary' });
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(
+      await ExcelWorkbook.fromModel(source, { mode: 'inline' }),
+      { readOnly: true },
+    );
+
+    await runtime.setActiveSheet('Summary');
+    expect(runtime.activeSheetName()).toBe('Summary');
+    await expect(runtime.setCellValue('A1', 'blocked')).rejects.toMatchObject({
+      name: 'EditorReadOnlyError',
+      code: 'EDITOR_READ_ONLY',
+    });
+    await expect(runtime.addSheet('Blocked')).rejects.toMatchObject({ code: 'EDITOR_READ_ONLY' });
+    expect(() => runtime.workbook()).toThrowError(/read-only/);
+    expect(runtime.canUndo()).toBe(false);
+    expect(runtime.model().sheets).toHaveLength(2);
+
+    runtime.setReadOnly(false);
+    await runtime.setCellValue('A1', 'allowed');
+    expect(runtime.activeSheet().cellsByAddress.get('A1')?.value).toBe('allowed');
+    await runtime.dispose();
+  });
+
   test('moves chart anchors through the user history stack', async () => {
     const source = model();
     const sheet = source.sheets[0]!;

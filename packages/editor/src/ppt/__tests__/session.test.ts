@@ -10,6 +10,39 @@ import { PptEditorSession } from '../session.js';
 import { buildPptPresentationScene } from '../scene.js';
 
 describe('PptEditorSession', () => {
+  test('allows selection but rejects edits and history while read-only', async () => {
+    const view = await buildPptEditorViewFromModel({
+      id: 'read-only-session-test',
+      slideSize: { width: 9144000, height: 5143500 },
+      slides: [{
+        id: '256',
+        index: 0,
+        shapes: [{
+          id: '2',
+          name: 'Title',
+          kind: 'textBox',
+          geometry: { left: 100000, top: 100000, width: 2000000, height: 500000 },
+          text: { text: 'Draft' },
+        }],
+      }],
+    });
+    const session = new PptEditorSession(view, { readOnly: true });
+
+    await session.dispatch({ kind: 'select-shape', slideIdOrIndex: 0, shapeIdOrName: 'Title' });
+    expect(session.selection()).toMatchObject({ kind: 'shape', shapeId: '2' });
+    await expect(session.dispatch({ kind: 'set-shape-text', slideIdOrIndex: 0, shapeIdOrName: 'Title', text: 'blocked' }))
+      .rejects.toMatchObject({ name: 'EditorReadOnlyError', code: 'EDITOR_READ_ONLY' });
+    await expect(session.undo()).rejects.toMatchObject({ code: 'EDITOR_READ_ONLY' });
+    expect(() => session.presentation()).toThrowError(/read-only/);
+    expect(session.revision()).toBe(0);
+    expect(session.scene().slides[0]!.nodes[0]!.text).toBe('Draft');
+
+    session.setReadOnly(false);
+    await session.dispatch({ kind: 'set-shape-text', slideIdOrIndex: 0, shapeIdOrName: 'Title', text: 'Final' });
+    expect(session.scene().slides[0]!.nodes[0]!.text).toBe('Final');
+    await session.destroy();
+  });
+
   test('uses resolved image previews without replacing the exported image resource', async () => {
     const originalCreateObjectURL = URL.createObjectURL;
     Object.defineProperty(URL, 'createObjectURL', {

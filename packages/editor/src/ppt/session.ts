@@ -17,6 +17,7 @@ import {
   type PptPresentationScene,
 } from './scene.js';
 import type { PptEditorView } from './view.js';
+import { EditorReadOnlyError } from '../read-only.js';
 
 export type PptEditorSelection =
   { kind: 'slide'; slideId: string } | { kind: 'shape'; slideId: string; shapeId: string } | null;
@@ -88,6 +89,7 @@ export interface PptEditorRuntimeEventMap {
 
 export interface PptEditorSessionOptions {
   maxHistory?: number;
+  readOnly?: boolean;
 }
 
 type Listener<T> = (event: T) => void;
@@ -108,6 +110,7 @@ export class PptEditorSession {
   private readonly redoStack: PptEditorHistoryEntry[] = [];
   private readonly textBodyOverrides = new Map<string, PptTextBodyOverride>();
   private readonly maxHistory: number;
+  private readOnlyValue: boolean;
   private readonly changeListeners = new Set<Listener<PptEditorChangeEvent>>();
   private readonly selectionListeners = new Set<Listener<PptEditorSelectionChangeEvent>>();
 
@@ -116,12 +119,14 @@ export class PptEditorSession {
     this.modelValue = view.model;
     this.sceneValue = view.scene;
     this.maxHistory = options.maxHistory ?? 50;
+    this.readOnlyValue = options.readOnly === true;
     this.selectionValue = view.scene.slides[0]
       ? { kind: 'slide', slideId: view.scene.slides[0].id }
       : null;
   }
 
   presentation(): Presentation {
+    this.assertWritable();
     return this.presentationValue;
   }
 
@@ -141,12 +146,20 @@ export class PptEditorSession {
     return this.revisionValue;
   }
 
+  isReadOnly(): boolean {
+    return this.readOnlyValue;
+  }
+
+  setReadOnly(readOnly: boolean): void {
+    this.readOnlyValue = readOnly;
+  }
+
   canUndo(): boolean {
-    return this.undoStack.length > 0;
+    return !this.readOnlyValue && this.undoStack.length > 0;
   }
 
   canRedo(): boolean {
-    return this.redoStack.length > 0;
+    return !this.readOnlyValue && this.redoStack.length > 0;
   }
 
   subscribe<K extends PptEditorRuntimeEvent>(
@@ -168,6 +181,7 @@ export class PptEditorSession {
       await this.applySelectionCommand(command);
       return;
     }
+    this.assertWritable();
 
     const before = await this.presentationValue.toZip();
     const nextSelection = await this.applyEditCommand(command);
@@ -178,6 +192,7 @@ export class PptEditorSession {
   }
 
   async undo(): Promise<void> {
+    this.assertWritable();
     const entry = this.undoStack.pop();
     if (!entry) return;
     const selection = this.selectionValue;
@@ -187,6 +202,7 @@ export class PptEditorSession {
   }
 
   async redo(): Promise<void> {
+    this.assertWritable();
     const entry = this.redoStack.pop();
     if (!entry) return;
     const selection = this.selectionValue;
@@ -222,6 +238,10 @@ export class PptEditorSession {
     this.redoStack.length = 0;
     this.changeListeners.clear();
     this.selectionListeners.clear();
+  }
+
+  private assertWritable(): void {
+    if (this.readOnlyValue) throw new EditorReadOnlyError('ppt');
   }
 
   private async applySelectionCommand(
