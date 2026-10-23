@@ -683,6 +683,99 @@ describe('PptEditorSession', () => {
     expect(backgroundFillShape.usesBackgroundFill).toBe(true);
   });
 
+  test('renders slide placeholders with geometry and text properties inherited through layout and master', () => {
+    const scene = buildPptPresentationScene({
+      id: 'editor-placeholder-inheritance-test',
+      slideSize: { width: 9144000, height: 6858000 },
+      slides: [
+        {
+          id: '256',
+          index: 0,
+          layout: {
+            relationshipId: 'rId1',
+            path: 'ppt/slideLayouts/slideLayout1.xml',
+            shapes: [
+              {
+                id: 'layout-title',
+                kind: 'placeholder',
+                placeholder: { type: 'title' },
+                geometry: {},
+                text: { text: 'Layout title' },
+              },
+              {
+                id: 'layout-body',
+                kind: 'placeholder',
+                placeholder: { index: '1' },
+                geometry: {},
+                text: { text: 'Layout body' },
+              },
+            ],
+            master: {
+              relationshipId: 'rId1',
+              path: 'ppt/slideMasters/slideMaster1.xml',
+              textStyles: {
+                title: { fontSize: 44, color: '#111111' },
+                body: { fontSize: 32, color: '#222222' },
+              },
+              shapes: [
+                {
+                  id: 'master-title',
+                  kind: 'placeholder',
+                  placeholder: { type: 'title' },
+                  geometry: { left: 457200, top: 274638, width: 8229600, height: 1143000 },
+                  text: { text: 'Master title', body: { anchor: 'middle', insetLeft: 91440 } },
+                },
+                {
+                  id: 'master-body',
+                  kind: 'placeholder',
+                  placeholder: { type: 'body', index: '1' },
+                  geometry: { left: 457200, top: 1600200, width: 8229600, height: 4525963 },
+                  text: { text: 'Master body', body: { autoFit: 'normal', insetLeft: 91440 } },
+                },
+              ],
+            },
+          },
+          shapes: [
+            {
+              id: '2',
+              name: 'Title 1',
+              kind: 'placeholder',
+              placeholder: { type: 'title' },
+              geometry: {},
+              text: { text: 'Office preview' },
+            },
+            {
+              id: '3',
+              name: 'Content Placeholder 2',
+              kind: 'placeholder',
+              placeholder: { index: '1' },
+              geometry: {},
+              text: { text: 'Uploaded once, preview current version' },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(scene.slides[0]!.nodes).toEqual([
+      expect.objectContaining({
+        id: '2',
+        bounds: { left: 457200, top: 274638, width: 8229600, height: 1143000 },
+        text: 'Office preview',
+        textStyle: { fontSize: 44, color: '#111111' },
+        textBody: { anchor: 'middle', insetLeft: 91440 },
+      }),
+      expect.objectContaining({
+        id: '3',
+        bounds: { left: 457200, top: 1600200, width: 8229600, height: 4525963 },
+        text: 'Uploaded once, preview current version',
+        textStyle: { fontSize: 32, color: '#222222' },
+        textBody: { autoFit: 'normal', insetLeft: 91440 },
+      }),
+    ]);
+    expect(scene.slides[0]!.source.shapes.map((shape) => shape.geometry)).toEqual([{}, {}]);
+  });
+
   test('blocks unsupported edit commands without adding history', async () => {
     const view = await buildPptEditorViewFromModel({
       id: 'editor-command-boundary-test',
@@ -990,9 +1083,7 @@ describe('PptEditorSession', () => {
       wrap: 'square',
     });
     const verified = await session.verifyExport();
-    const title = verified.slides[0]!.shapes.find(
-      (shape) => shape.name === 'Title Placeholder',
-    )!;
+    const title = verified.slides[0]!.shapes.find((shape) => shape.name === 'Title Placeholder')!;
     expect(title.text?.body).toMatchObject({ autoFit: 'none', wrap: 'square' });
     expect(title.text?.style?.fontSize).toBe(44);
 

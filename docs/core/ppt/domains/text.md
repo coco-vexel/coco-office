@@ -45,6 +45,7 @@ for (const shape of await slide.shapes.items()) {
 | `shape.text.runs()`                              | `Promise<PptTextRun[]>`          | Flattened text runs, including run hyperlinks.                                     |
 | `shape.text.effectiveRuns()`                     | `Promise<PptTextRun[]>`          | Flattened runs with inherited master, layout, shape, paragraph, and run styles.    |
 | `shape.text.body()`                              | `Promise<PptTextBodyProperties>` | Text body anchor, auto-fit, wrap, vertical mode, and insets.                       |
+| `shape.text.effectiveBody()`                     | `Promise<PptTextBodyProperties>` | Text body properties resolved through master, layout, and slide.                   |
 | `shape.text.setParagraphs(paragraphs)`           | `Promise<void>`                  | Rebuilds structured paragraphs and runs.                                           |
 | `shape.text.setBodyProperties(body)`             | `Promise<void>`                  | Updates body properties such as auto-fit without rebuilding text.                  |
 | `shape.text.setTextStyle(style)`                 | `Promise<void>`                  | Preferred whole-shape text style update.                                           |

@@ -28,6 +28,7 @@ import type {
   PptImageStyle,
   PptPresentationModel,
   PptPresentationProperties,
+  PptPlaceholderModel,
   PptShapeGeometry,
   PptShapeStyle,
   PptSlideSize,
@@ -52,6 +53,7 @@ import type {
   PptTextWriteOptions,
 } from './model.js';
 import { PptMutationLog, type PptMutation } from './mutations.js';
+import { resolvePptEffectivePlaceholderProperties } from './placeholder-inheritance.js';
 import {
   findOrCreateTransform,
   readPresentationPackage,
@@ -834,8 +836,34 @@ export class ShapeCore {
     return { ...this.model().geometry };
   }
 
+  effectiveGeometry(): PptShapeGeometry {
+    const shape = this.internal();
+    return resolvePptEffectivePlaceholderProperties(shape.model, shape.slide.model.layout).geometry;
+  }
+
+  placeholder(): PptPlaceholderModel | null {
+    const placeholder = this.model().placeholder;
+    return placeholder ? { ...placeholder } : null;
+  }
+
+  effectivePlaceholder(): PptPlaceholderModel | null {
+    const shape = this.internal();
+    const placeholder = resolvePptEffectivePlaceholderProperties(
+      shape.model,
+      shape.slide.model.layout,
+    ).placeholder;
+    return placeholder ? { ...placeholder } : null;
+  }
+
   style(): PptShapeStyle {
     return { ...this.model().style };
+  }
+
+  effectiveStyle(): PptShapeStyle {
+    const shape = this.internal();
+    return {
+      ...resolvePptEffectivePlaceholderProperties(shape.model, shape.slide.model.layout).style,
+    };
   }
 
   hyperlink(): PptHyperlinkModel | null {
@@ -1072,6 +1100,13 @@ export class ShapeTextApiCore {
 
   body(): PptTextBodyProperties {
     return { ...this.internal().model.text?.body };
+  }
+
+  effectiveBody(): PptTextBodyProperties {
+    const shape = this.internal();
+    return {
+      ...resolvePptEffectivePlaceholderProperties(shape.model, shape.slide.model.layout).textBody,
+    };
   }
 
   paragraphs(): PptTextParagraph[] {
@@ -1356,42 +1391,9 @@ export class ShapeTextApiCore {
 }
 
 function effectiveShapeTextStyle(shape: PptShapeInternal): PptTextStyle {
-  const layout = shape.slide.model.layout;
-  const master = layout?.master;
-  const placeholder = shape.model.placeholder;
-  const masterDefault = placeholder
-    ? master?.textStyles?.[masterTextStyleKind(placeholder.type)]
-    : master?.textStyles?.other;
-  const masterShape = findMatchingPlaceholderShape(master?.shapes, shape.model);
-  const layoutShape = findMatchingPlaceholderShape(layout?.shapes, shape.model);
   return {
-    ...masterDefault,
-    ...masterShape?.text?.style,
-    ...layoutShape?.text?.style,
-    ...shape.model.text?.style,
+    ...resolvePptEffectivePlaceholderProperties(shape.model, shape.slide.model.layout).textStyle,
   };
-}
-
-function masterTextStyleKind(type: string | undefined): 'title' | 'body' | 'other' {
-  if (type === 'title' || type === 'ctrTitle') return 'title';
-  if (type === 'body' || type === 'subTitle' || type === 'obj') return 'body';
-  return 'other';
-}
-
-function findMatchingPlaceholderShape(
-  candidates: readonly PptShapeModel[] | undefined,
-  shape: PptShapeModel,
-): PptShapeModel | undefined {
-  if (!shape.placeholder) return undefined;
-  return candidates?.find((candidate) => {
-    if (!candidate.placeholder) return false;
-    if (shape.placeholder?.index && candidate.placeholder.index === shape.placeholder.index) {
-      return true;
-    }
-    return Boolean(
-      shape.placeholder?.type && candidate.placeholder.type === shape.placeholder.type,
-    );
-  });
 }
 
 export class ShapeChartApiCore {
@@ -1663,13 +1665,11 @@ function chartDataLabelLayouts(
   return result;
 }
 
-function chartDataLabelBoolean<K extends 'showValueLabels' | 'showCategoryNameLabels' | 'showPercentLabels'>(
-  dLbls: Element,
-  xmlName: string,
-  key: K,
-): Partial<Record<K, boolean>> {
+function chartDataLabelBoolean<
+  K extends 'showValueLabels' | 'showCategoryNameLabels' | 'showPercentLabels',
+>(dLbls: Element, xmlName: string, key: K): Partial<Record<K, boolean>> {
   const value = parseBooleanAttr(firstChildLocal(dLbls, xmlName)?.getAttribute('val') ?? null);
-  return value === undefined ? {} : { [key]: value } as Partial<Record<K, boolean>>;
+  return value === undefined ? {} : ({ [key]: value } as Partial<Record<K, boolean>>);
 }
 
 function mergeChartDataLabelSettings(
@@ -2160,9 +2160,7 @@ export class TableApiCore {
     rowStyles.splice(safeColumn, 1, {
       ...previousStyle,
       ...normalized,
-      ...(normalized.body
-        ? { body: { ...previousStyle?.body, ...normalized.body } }
-        : {}),
+      ...(normalized.body ? { body: { ...previousStyle?.body, ...normalized.body } } : {}),
       ...(normalized.textStyle
         ? { textStyle: { ...previousStyle?.textStyle, ...normalized.textStyle } }
         : {}),
@@ -2218,7 +2216,9 @@ export class TableApiCore {
       (item) => item.row === safeRow && item.column === safeColumn,
     );
     if (merge?.hMerge || merge?.vMerge) {
-      throw new Error(`Presentation: cannot edit merged continuation cell ${safeRow},${safeColumn}`);
+      throw new Error(
+        `Presentation: cannot edit merged continuation cell ${safeRow},${safeColumn}`,
+      );
     }
     return coordinates;
   }

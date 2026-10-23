@@ -25,7 +25,7 @@ to expose the same live-object API in inline and future worker modes.
 
 | Rule              | Contract                                                                                                                     |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Public root       | Use `Presentation` from `@coco-vexel/coco-office/ppt`.                                                                             |
+| Public root       | Use `Presentation` from `@coco-vexel/coco-office/ppt`.                                                                       |
 | Runtime mode      | `mode: 'auto' \| 'inline' \| 'worker'` exists in options. Current implementation resolves to inline; worker mode is planned. |
 | Live handles      | `getItem(...)`, `getItemAt(...)`, `getCell(...)`, and collection properties return lightweight handles synchronously.        |
 | Reads and writes  | Methods that read, mutate, serialize, search, check existence, or return snapshots are async. Always `await` them.           |
@@ -181,31 +181,34 @@ supported sibling edits instead of raw OOXML edits.
 
 ### Shapes
 
-| API                                                      | Returns                              | Notes                                                    |
-| -------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------- |
-| `slide.shapes.items()`                                   | `Promise<Shape[]>`                   | Lists shapes in shape-tree order, which is z-order.      |
-| `slide.shapes.getCount()`                                | `Promise<number>`                    | Shape count.                                             |
-| `slide.shapes.getItem(idOrName)`                         | `Shape`                              | Ambiguous duplicated names throw.                        |
-| `slide.shapes.getItemAt(index)`                          | `Shape`                              | 0-based shape-tree index.                                |
-| `slide.shapes.getItemOrNullObject(idOrName)`             | `Promise<Shape \| null>`             | Existence check.                                         |
-| `slide.shapes.addTextBox(text, options?)`                | `Promise<Shape>`                     | Adds text box.                                           |
-| `slide.shapes.addTable(rowCount, columnCount, options?)` | `Promise<Shape>`                     | Adds simple table.                                       |
-| `slide.shapes.addImage(source, options?)`                | `Promise<Shape>`                     | Adds picture and media relationship.                     |
-| `slide.shapes.addShape(preset, options?)`                | `Promise<Shape>`                     | Adds `rect`, `roundRect`, `ellipse`, or `line`.          |
-| `slide.shapes.deleteItem(idOrName)`                      | `Promise<void>`                      | Deletes shape.                                           |
-| `shape.id()` / `name()` / `kind()`                       | `Promise<...>`                       | Basic shape metadata.                                    |
-| `shape.setName(name)`                                    | `Promise<void>`                      | Updates `p:cNvPr/@name`.                                 |
-| `shape.geometry()` / `setGeometry(...)`                  | `Promise<...>`                       | Reads/writes `a:xfrm`.                                   |
-| `shape.style()` / `setStyle(...)`                        | `Promise<...>`                       | Shape fill, line, opacity, and shadow style.             |
-| `shape.hyperlink()`                                      | `Promise<PptHyperlinkModel \| null>` | Shape-level click hyperlink.                             |
-| `shape.setHyperlink(options)` / `clearHyperlink()`       | `Promise<void>`                      | Writes/removes shape-level click hyperlink relationship. |
-| `shape.toModel().placeholder`                            | `PptPlaceholderModel \| undefined`   | Placeholder type/index/size/orientation snapshot.        |
-| `shape.setFillColor(color)`                              | `Promise<void>`                      | Convenience fill setter.                                 |
-| `shape.setLineStyle(style)`                              | `Promise<void>`                      | Convenience line style setter.                           |
-| `shape.bringToFront()` / `sendToBack()`                  | `Promise<void>`                      | Moves shape in `p:spTree`.                               |
-| `shape.duplicate(options?)`                              | `Promise<Shape>`                     | Duplicates this shape on the same slide.                 |
-| `shape.delete()`                                         | `Promise<void>`                      | Deletes this shape.                                      |
-| `shape.toModel()`                                        | `Promise<PptShapeModel>`             | Defensive shape snapshot.                                |
+| API                                                      | Returns                                | Notes                                                                                    |
+| -------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `slide.shapes.items()`                                   | `Promise<Shape[]>`                     | Lists shapes in shape-tree order, which is z-order.                                      |
+| `slide.shapes.getCount()`                                | `Promise<number>`                      | Shape count.                                                                             |
+| `slide.shapes.getItem(idOrName)`                         | `Shape`                                | Ambiguous duplicated names throw.                                                        |
+| `slide.shapes.getItemAt(index)`                          | `Shape`                                | 0-based shape-tree index.                                                                |
+| `slide.shapes.getItemOrNullObject(idOrName)`             | `Promise<Shape \| null>`               | Existence check.                                                                         |
+| `slide.shapes.addTextBox(text, options?)`                | `Promise<Shape>`                       | Adds text box.                                                                           |
+| `slide.shapes.addTable(rowCount, columnCount, options?)` | `Promise<Shape>`                       | Adds simple table.                                                                       |
+| `slide.shapes.addImage(source, options?)`                | `Promise<Shape>`                       | Adds picture and media relationship.                                                     |
+| `slide.shapes.addShape(preset, options?)`                | `Promise<Shape>`                       | Adds `rect`, `roundRect`, `ellipse`, or `line`.                                          |
+| `slide.shapes.deleteItem(idOrName)`                      | `Promise<void>`                        | Deletes shape.                                                                           |
+| `shape.id()` / `name()` / `kind()`                       | `Promise<...>`                         | Basic shape metadata.                                                                    |
+| `shape.setName(name)`                                    | `Promise<void>`                        | Updates `p:cNvPr/@name`.                                                                 |
+| `shape.geometry()` / `setGeometry(...)`                  | `Promise<...>`                         | Reads/writes direct `a:xfrm`.                                                            |
+| `shape.effectiveGeometry()`                              | `Promise<PptShapeGeometry>`            | Resolves placeholder geometry through master and layout without writing it to the slide. |
+| `shape.placeholder()` / `effectivePlaceholder()`         | `Promise<PptPlaceholderModel \| null>` | Reads direct/effective placeholder metadata.                                             |
+| `shape.style()` / `setStyle(...)`                        | `Promise<...>`                         | Shape fill, line, opacity, and shadow style.                                             |
+| `shape.effectiveStyle()`                                 | `Promise<PptShapeStyle>`               | Resolves inherited placeholder shape style.                                              |
+| `shape.hyperlink()`                                      | `Promise<PptHyperlinkModel \| null>`   | Shape-level click hyperlink.                                                             |
+| `shape.setHyperlink(options)` / `clearHyperlink()`       | `Promise<void>`                        | Writes/removes shape-level click hyperlink relationship.                                 |
+| `shape.toModel().placeholder`                            | `PptPlaceholderModel \| undefined`     | Placeholder type/index/size/orientation snapshot.                                        |
+| `shape.setFillColor(color)`                              | `Promise<void>`                        | Convenience fill setter.                                                                 |
+| `shape.setLineStyle(style)`                              | `Promise<void>`                        | Convenience line style setter.                                                           |
+| `shape.bringToFront()` / `sendToBack()`                  | `Promise<void>`                        | Moves shape in `p:spTree`.                                                               |
+| `shape.duplicate(options?)`                              | `Promise<Shape>`                       | Duplicates this shape on the same slide.                                                 |
+| `shape.delete()`                                         | `Promise<void>`                        | Deletes this shape.                                                                      |
+| `shape.toModel()`                                        | `Promise<PptShapeModel>`               | Defensive shape snapshot.                                                                |
 
 ### Charts
 
@@ -241,29 +244,30 @@ supported sibling edits instead of raw OOXML edits.
 
 ### Text
 
-| API                                              | Returns                          | Notes                                                               |
-| ------------------------------------------------ | -------------------------------- | ------------------------------------------------------------------- |
-| `shape.text.hasText()`                           | `Promise<boolean>`               | True when shape has text runs.                                      |
-| `shape.text.getText()`                           | `Promise<string>`                | Aggregated shape text.                                              |
-| `shape.text.paragraphs()`                        | `Promise<PptTextParagraph[]>`    | Paragraph/run structure.                                            |
-| `shape.text.runs()`                              | `Promise<PptTextRun[]>`          | Flattened text runs, including run hyperlinks.                      |
+| API                                              | Returns                          | Notes                                                                |
+| ------------------------------------------------ | -------------------------------- | -------------------------------------------------------------------- |
+| `shape.text.hasText()`                           | `Promise<boolean>`               | True when shape has text runs.                                       |
+| `shape.text.getText()`                           | `Promise<string>`                | Aggregated shape text.                                               |
+| `shape.text.paragraphs()`                        | `Promise<PptTextParagraph[]>`    | Paragraph/run structure.                                             |
+| `shape.text.runs()`                              | `Promise<PptTextRun[]>`          | Flattened text runs, including run hyperlinks.                       |
 | `shape.text.effectiveRuns()`                     | `Promise<PptTextRun[]>`          | Runs with inherited master, layout, shape, paragraph, and run style. |
-| `shape.text.body()`                              | `Promise<PptTextBodyProperties>` | Text body anchor, auto-fit, wrap, vertical mode, and insets.        |
-| `shape.text.setParagraphs(paragraphs)`           | `Promise<void>`                  | Rebuilds structured paragraphs and runs.                            |
-| `shape.text.setBodyProperties(body)`             | `Promise<void>`                  | Updates body properties such as auto-fit without rebuilding text.   |
-| `shape.text.setTextStyle(style)`                 | `Promise<void>`                  | Preferred whole-shape text style update.                            |
-| `shape.text.setRunTextStyle(index, style)`       | `Promise<void>`                  | Preferred explicit run style update.                                |
-| `shape.text.setRunStyle(index, style)`           | `Promise<void>`                  | Compatibility alias for `setRunTextStyle`.                          |
-| `shape.text.setRunHyperlink(index, options)`     | `Promise<void>`                  | Writes hyperlink on one flattened text run.                         |
-| `shape.text.clearRunHyperlink(index)`            | `Promise<void>`                  | Removes hyperlink from one flattened text run.                      |
-| `shape.text.setText(text, opts?)`                | `Promise<void>`                  | Writes text to first run and clears extra runs.                     |
-| `shape.text.replace(search, replacement, opts?)` | `Promise<PptTextReplaceResult>`  | Replaces inside one shape.                                          |
-| `shape.text.style()`                             | `Promise<PptTextStyle>`          | Font, color, emphasis, baseline, highlight, alignment, and spacing. |
-| `shape.text.effectiveStyle()`                    | `Promise<PptTextStyle>`          | Effective style after master, layout, and direct-shape inheritance. |
-| `shape.text.setStyle(style)`                     | `Promise<void>`                  | Compatibility alias for `setTextStyle`.                             |
-| `shape.text.setBold(enabled)`                    | `Promise<void>`                  | Convenience setter.                                                 |
-| `shape.text.setItalic(enabled)`                  | `Promise<void>`                  | Convenience setter.                                                 |
-| `shape.text.setAlignment(alignment)`             | `Promise<void>`                  | `left`, `center`, `right`, `justify`, `distributed`.                |
+| `shape.text.body()`                              | `Promise<PptTextBodyProperties>` | Text body anchor, auto-fit, wrap, vertical mode, and insets.         |
+| `shape.text.effectiveBody()`                     | `Promise<PptTextBodyProperties>` | Text body properties resolved through master, layout, and slide.     |
+| `shape.text.setParagraphs(paragraphs)`           | `Promise<void>`                  | Rebuilds structured paragraphs and runs.                             |
+| `shape.text.setBodyProperties(body)`             | `Promise<void>`                  | Updates body properties such as auto-fit without rebuilding text.    |
+| `shape.text.setTextStyle(style)`                 | `Promise<void>`                  | Preferred whole-shape text style update.                             |
+| `shape.text.setRunTextStyle(index, style)`       | `Promise<void>`                  | Preferred explicit run style update.                                 |
+| `shape.text.setRunStyle(index, style)`           | `Promise<void>`                  | Compatibility alias for `setRunTextStyle`.                           |
+| `shape.text.setRunHyperlink(index, options)`     | `Promise<void>`                  | Writes hyperlink on one flattened text run.                          |
+| `shape.text.clearRunHyperlink(index)`            | `Promise<void>`                  | Removes hyperlink from one flattened text run.                       |
+| `shape.text.setText(text, opts?)`                | `Promise<void>`                  | Writes text to first run and clears extra runs.                      |
+| `shape.text.replace(search, replacement, opts?)` | `Promise<PptTextReplaceResult>`  | Replaces inside one shape.                                           |
+| `shape.text.style()`                             | `Promise<PptTextStyle>`          | Font, color, emphasis, baseline, highlight, alignment, and spacing.  |
+| `shape.text.effectiveStyle()`                    | `Promise<PptTextStyle>`          | Effective style after master, layout, and direct-shape inheritance.  |
+| `shape.text.setStyle(style)`                     | `Promise<void>`                  | Compatibility alias for `setTextStyle`.                              |
+| `shape.text.setBold(enabled)`                    | `Promise<void>`                  | Convenience setter.                                                  |
+| `shape.text.setItalic(enabled)`                  | `Promise<void>`                  | Convenience setter.                                                  |
+| `shape.text.setAlignment(alignment)`             | `Promise<void>`                  | `left`, `center`, `right`, `justify`, `distributed`.                 |
 
 ### Images
 

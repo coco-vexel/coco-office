@@ -77,21 +77,27 @@ editing a real deck.
 
 ## Shape Metadata And Geometry
 
-| API                           | Returns                              | Notes                                                                   |
-| ----------------------------- | ------------------------------------ | ----------------------------------------------------------------------- |
-| `shape.id()`                  | `Promise<string>`                    | Stable within slide.                                                    |
-| `shape.name()`                | `Promise<string \| undefined>`       | Display name when present.                                              |
-| `shape.setName(name)`         | `Promise<void>`                      | Updates `p:cNvPr/@name`.                                                |
-| `shape.kind()`                | `Promise<PptShapeKind>`              | `textBox`, `picture`, `table`, `geometricShape`, `line`, etc.           |
-| `shape.geometry()`            | `Promise<PptShapeGeometry>`          | `{ left, top, width, height, rotation, flipHorizontal, flipVertical }`. |
-| `shape.hyperlink()`           | `Promise<PptHyperlinkModel \| null>` | Shape-level click hyperlink.                                            |
-| `shape.setHyperlink(options)` | `Promise<void>`                      | Writes `a:hlinkClick` and slide hyperlink relationship.                 |
-| `shape.clearHyperlink()`      | `Promise<void>`                      | Removes shape-level hyperlink and unused relationship.                  |
-| `shape.toModel().placeholder` | `PptPlaceholderModel \| undefined`   | Placeholder type/index/size/orientation snapshot.                       |
-| `shape.setGeometry(geometry)` | `Promise<void>`                      | Partial update.                                                         |
-| `shape.toModel()`             | `Promise<PptShapeModel>`             | Defensive snapshot.                                                     |
+| API                            | Returns                                | Notes                                                                          |
+| ------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------ |
+| `shape.id()`                   | `Promise<string>`                      | Stable within slide.                                                           |
+| `shape.name()`                 | `Promise<string \| undefined>`         | Display name when present.                                                     |
+| `shape.setName(name)`          | `Promise<void>`                        | Updates `p:cNvPr/@name`.                                                       |
+| `shape.kind()`                 | `Promise<PptShapeKind>`                | `textBox`, `picture`, `table`, `geometricShape`, `line`, etc.                  |
+| `shape.geometry()`             | `Promise<PptShapeGeometry>`            | Direct `{ left, top, width, height, rotation, flipHorizontal, flipVertical }`. |
+| `shape.effectiveGeometry()`    | `Promise<PptShapeGeometry>`            | Placeholder geometry resolved through master, layout, and slide.               |
+| `shape.placeholder()`          | `Promise<PptPlaceholderModel \| null>` | Direct placeholder metadata.                                                   |
+| `shape.effectivePlaceholder()` | `Promise<PptPlaceholderModel \| null>` | Placeholder metadata resolved through master, layout, and slide.               |
+| `shape.hyperlink()`            | `Promise<PptHyperlinkModel \| null>`   | Shape-level click hyperlink.                                                   |
+| `shape.setHyperlink(options)`  | `Promise<void>`                        | Writes `a:hlinkClick` and slide hyperlink relationship.                        |
+| `shape.clearHyperlink()`       | `Promise<void>`                        | Removes shape-level hyperlink and unused relationship.                         |
+| `shape.toModel().placeholder`  | `PptPlaceholderModel \| undefined`     | Placeholder type/index/size/orientation snapshot.                              |
+| `shape.setGeometry(geometry)`  | `Promise<void>`                        | Partial update.                                                                |
+| `shape.toModel()`              | `Promise<PptShapeModel>`               | Defensive snapshot.                                                            |
 
 ## Shape Style
+
+`shape.style()` returns direct shape properties. `shape.effectiveStyle()` overlays matching
+master and layout placeholder styles for rendering without materializing them into slide XML.
 
 ```ts
 await shape.setFillColor('#FF0000');
@@ -111,12 +117,12 @@ await shape.setStyle({
 });
 ```
 
-| API                         | Returns                  | Notes                                                                   |
-| --------------------------- | ------------------------ | ----------------------------------------------------------------------- |
+| API                         | Returns                  | Notes                                                                        |
+| --------------------------- | ------------------------ | ---------------------------------------------------------------------------- |
 | `shape.style()`             | `Promise<PptShapeStyle>` | Fill, line, opacity, gradient, cap, dash, line-end, and shadow model fields. |
-| `shape.setStyle(style)`     | `Promise<void>`          | Partial update.                                                         |
-| `shape.setFillColor(color)` | `Promise<void>`          | `#RRGGBB` or `RRGGBB`.                                                  |
-| `shape.setLineStyle(style)` | `Promise<void>`          | `lineColor`, `lineWidth`.                                               |
+| `shape.setStyle(style)`     | `Promise<void>`          | Partial update.                                                              |
+| `shape.setFillColor(color)` | `Promise<void>`          | `#RRGGBB` or `RRGGBB`.                                                       |
+| `shape.setLineStyle(style)` | `Promise<void>`          | `lineColor`, `lineWidth`.                                                    |
 
 The P0 write surface is solid fill color/opacity plus solid line
 color/opacity/width and simple outer shadow. Additional fields such as gradient,

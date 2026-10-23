@@ -39,6 +39,7 @@ import type {
   PptImageSource,
   PptImageStyle,
   PptParagraphAlignment,
+  PptPlaceholderModel,
   PptPresentationModel,
   PptPresentationProperties,
   PptShapeGeometry,
@@ -440,8 +441,24 @@ export class Shape {
     return this.core.geometry();
   }
 
+  async effectiveGeometry(): Promise<PptShapeGeometry> {
+    return this.core.effectiveGeometry();
+  }
+
+  async placeholder(): Promise<PptPlaceholderModel | null> {
+    return this.core.placeholder();
+  }
+
+  async effectivePlaceholder(): Promise<PptPlaceholderModel | null> {
+    return this.core.effectivePlaceholder();
+  }
+
   async style(): Promise<PptShapeStyle> {
     return this.core.style();
+  }
+
+  async effectiveStyle(): Promise<PptShapeStyle> {
+    return this.core.effectiveStyle();
   }
 
   async hyperlink(): Promise<PptHyperlinkModel | null> {
@@ -563,6 +580,10 @@ export class ShapeTextApi {
 
   async body(): Promise<PptTextBodyProperties> {
     return this.core.body();
+  }
+
+  async effectiveBody(): Promise<PptTextBodyProperties> {
+    return this.core.effectiveBody();
   }
 
   async paragraphs(): Promise<PptTextParagraph[]> {
