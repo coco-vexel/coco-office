@@ -1105,6 +1105,7 @@ coco-word-native-table td.is-cell-range-focus::after {
 
 .coco-word-native-editor-host {
   position: relative;
+  overflow: auto;
   user-select: text;
   -webkit-user-select: text;
 }
