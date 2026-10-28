@@ -174,7 +174,7 @@ export interface Paragraph extends ParagraphInfo {
    * Reads the current metadata for this paragraph.
    */
   getInfo(
-    opts?: Pick<ListParagraphsOptions, 'includeFormat' | 'textFormat'>,
+    opts?: Pick<ListParagraphsOptions, 'includeFormat' | 'textFormat' | 'includeTableInfo'>,
   ): Promise<ParagraphInfo | null>;
   /**
    * Reads the current plain text of this paragraph.
@@ -994,7 +994,7 @@ class LiveParagraph implements Paragraph {
   }
 
   async getInfo(
-    opts?: Pick<ListParagraphsOptions, 'includeFormat' | 'textFormat'>,
+    opts?: Pick<ListParagraphsOptions, 'includeFormat' | 'textFormat' | 'includeTableInfo'>,
   ): Promise<ParagraphInfo | null> {
     this.assertNotDisposed();
     if (opts?.includeFormat || opts?.textFormat) {
