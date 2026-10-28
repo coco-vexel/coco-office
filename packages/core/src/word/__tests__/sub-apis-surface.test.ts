@@ -319,6 +319,33 @@ describe('WordDocument 读 API namespace 表面(#92)', () => {
     await doc.dispose();
   });
 
+  test('end-to-end:paragraph live object getInfo 可按需读取表格坐标', async () => {
+    const doc = await makeDoc(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}">
+  <w:body>
+    <w:p w14:paraId="OUTSIDE1"><w:r><w:t>outside</w:t></w:r></w:p>
+    <w:tbl>
+      <w:tblPr/>
+      <w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid>
+      <w:tr><w:tc><w:p w14:paraId="INSIDE01"><w:r><w:t>inside</w:t></w:r></w:p></w:tc></w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>`);
+    const [table] = await doc.tables.list();
+    const inside = await doc.paragraphs.get('INSIDE01');
+    const outside = await doc.paragraphs.get('OUTSIDE1');
+
+    expect((await inside?.getInfo())?.table).toBeUndefined();
+    expect((await inside?.getInfo({ includeTableInfo: true }))?.table).toEqual({
+      tableId: table!.tableId,
+      row: 0,
+      col: 0,
+    });
+    expect((await outside?.getInfo({ includeTableInfo: true }))?.table).toBeUndefined();
+
+    await doc.dispose();
+  });
+
   test('end-to-end:paragraph.findText 返回可写 TextRange', async () => {
     const doc = await makeDoc();
     const paragraph = await doc.paragraphs.get('AAAAAAA1');
