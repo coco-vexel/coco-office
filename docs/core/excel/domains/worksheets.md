@@ -55,8 +55,23 @@ Generated code should use worksheet domain properties directly. Do not invent pa
 | `sheet.deleteRows(rowIndex, count?)` | Delete rows starting at `rowIndex`. | `rowIndex: number`, `count = 1` | `Promise<void>` |
 | `sheet.insertColumns(columnIndex, count?)` | Insert columns before `columnIndex`. | `columnIndex: number`, `count = 1` | `Promise<void>` |
 | `sheet.deleteColumns(columnIndex, count?)` | Delete columns starting at `columnIndex`. | `columnIndex: number`, `count = 1` | `Promise<void>` |
+| `sheet.moveRows(rowIndex, count, beforeRowIndex)` | Move a contiguous row block before an original row position. | all indexes are 1-based | `Promise<void>` |
+| `sheet.moveColumns(columnIndex, count, beforeColumnIndex)` | Move a contiguous column block before an original column position. | all indexes are 1-based | `Promise<void>` |
 
 Rows and columns are 1-based. Counts must be positive integers.
+
+Move destinations use the worksheet coordinates from before the move. A destination inside the
+source block, or immediately after it, is a no-op. For example, moving `F:I` before `C` is:
+
+```ts
+await sheet.moveColumns(6, 4, 3);
+```
+
+Use structural moves when the user asks to put whole rows or columns before/after another row or
+column. Do not rebuild the entire used range with `setValues()` and `setFormulas()` just to reorder
+rows or columns. Structural moves keep cell values, formulas, and styles attached to their cells and
+rewrite supported dependent references. A reference that would become a non-contiguous range is
+rewritten to `#REF!` rather than silently widened.
 
 Structural edits update supported dependent references:
 
@@ -72,6 +87,16 @@ Structural edits update supported dependent references:
 | Sheet-view panes/selections | yes when reference remains valid |
 | Drawing anchors | moved by marker index |
 | Chart formula refs | best-effort A1 rewrite |
+
+## CodeAgent Rules
+
+1. Resolve human column names to current 1-based indexes before moving them.
+2. Use `moveColumns` / `moveRows` for whole-axis reordering; do not rewrite the full table matrix.
+3. `beforeColumnIndex` and `beforeRowIndex` refer to positions before the move.
+4. After a move, copy formatting only to the explicitly requested cells. Moving a column already
+   carries its cell styles and column metadata.
+5. Do not add borders, resize columns, or restyle unrelated headers unless the user requested it.
+6. Verify the final header order and affected formulas after the host reloads the workbook.
 
 ## Sheet-Level Domains
 

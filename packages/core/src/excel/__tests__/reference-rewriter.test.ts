@@ -4,12 +4,15 @@ import {
   renameSheetInReference,
   rewriteFormulaForColumnDelete,
   rewriteFormulaForColumnInsert,
+  rewriteFormulaForColumnMove,
   rewriteFormulaForRowDelete,
   rewriteFormulaForRowInsert,
   rewriteReferenceForColumnDelete,
   rewriteReferenceForColumnInsert,
+  rewriteReferenceForColumnMove,
   rewriteReferenceForRowDelete,
   rewriteReferenceForRowInsert,
+  rewriteReferenceForRowMove,
   shiftFormulaReferences,
   shiftReferenceRelative,
   rewriteFormulaForRowSort,
@@ -74,6 +77,26 @@ describe('Excel reference rewriter', () => {
     expect(rewriteReferenceForColumnDelete('B1:C2', 2, 2)).toEqual({
       ok: false,
       address: '#REF!',
+    });
+  });
+
+  test('rewrites references for row and column moves', () => {
+    expect(rewriteReferenceForColumnMove('F2:I2', 6, 4, 3)).toEqual({
+      ok: true,
+      address: 'C2:F2',
+    });
+    expect(rewriteReferenceForColumnMove('C2:E2', 6, 4, 3)).toEqual({
+      ok: true,
+      address: 'G2:I2',
+    });
+    expect(rewriteFormulaForColumnMove('C2+D2', 6, 4, 3)).toBe('G2+H2');
+    expect(rewriteReferenceForColumnMove('C2:F2', 6, 4, 3)).toEqual({
+      ok: false,
+      address: '#REF!',
+    });
+    expect(rewriteReferenceForRowMove('A5:A7', 5, 3, 2)).toEqual({
+      ok: true,
+      address: 'A2:A4',
     });
   });
 

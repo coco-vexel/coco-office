@@ -505,6 +505,21 @@ export class ExcelWorksheet {
     await this.run<void>(`sheet.deleteColumns(args.columnIndex, args.count);`, { columnIndex, count });
   }
 
+  async moveRows(rowIndex: number, count: number, beforeRowIndex: number): Promise<void> {
+    await this.run<void>(`sheet.moveRows(args.rowIndex, args.count, args.beforeRowIndex);`, {
+      rowIndex,
+      count,
+      beforeRowIndex,
+    });
+  }
+
+  async moveColumns(columnIndex: number, count: number, beforeColumnIndex: number): Promise<void> {
+    await this.run<void>(
+      `sheet.moveColumns(args.columnIndex, args.count, args.beforeColumnIndex);`,
+      { columnIndex, count, beforeColumnIndex },
+    );
+  }
+
   async toModel(): Promise<ExcelSheetModel> {
     return this.run<ExcelSheetModel>(`return sheet.toModel();`);
   }

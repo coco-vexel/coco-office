@@ -171,6 +171,8 @@ const mutations = await workbook.getMutations();
 | `sheet.deleteRows(rowIndex, count?)` | `Promise<void>` | Deletes rows and rewrites supported references. |
 | `sheet.insertColumns(columnIndex, count?)` | `Promise<void>` | Inserts columns and rewrites supported references. |
 | `sheet.deleteColumns(columnIndex, count?)` | `Promise<void>` | Deletes columns and rewrites supported references. |
+| `sheet.moveRows(rowIndex, count, beforeRowIndex)` | `Promise<void>` | Moves a contiguous row block before an original row position. |
+| `sheet.moveColumns(columnIndex, count, beforeColumnIndex)` | `Promise<void>` | Moves a contiguous column block before an original column position. |
 | `sheet.toModel()` | `Promise<ExcelSheetModel>` | Defensive sheet snapshot. |
 
 ### Range And Cell

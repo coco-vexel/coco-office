@@ -114,6 +114,30 @@ export function rewriteFormulaForColumnDelete(
   );
 }
 
+export function rewriteFormulaForRowMove(
+  formula: string,
+  rowIndex: number,
+  count: number,
+  beforeRowIndex: number,
+  options: ExcelReferenceRewriteOptions = {},
+): string {
+  return rewriteFormulaReferences(formula, (reference) =>
+    rewriteReferenceForRowMove(reference, rowIndex, count, beforeRowIndex, options),
+  );
+}
+
+export function rewriteFormulaForColumnMove(
+  formula: string,
+  columnIndex: number,
+  count: number,
+  beforeColumnIndex: number,
+  options: ExcelReferenceRewriteOptions = {},
+): string {
+  return rewriteFormulaReferences(formula, (reference) =>
+    rewriteReferenceForColumnMove(reference, columnIndex, count, beforeColumnIndex, options),
+  );
+}
+
 /**
  * Rebase a formula as if its containing cell moved by the supplied offsets.
  * Relative row/column coordinates move; absolute coordinates and string literals stay unchanged.
@@ -249,6 +273,56 @@ export function rewriteReferenceForColumnDelete(
   };
 }
 
+export function rewriteReferenceForRowMove(
+  address: string,
+  rowIndex: number,
+  count: number,
+  beforeRowIndex: number,
+  options: ExcelReferenceRewriteOptions = {},
+): ExcelReferenceRewriteResult {
+  assertMoveArguments(rowIndex, count, beforeRowIndex, 'row');
+  const ref = parseReference(address);
+  if (!isTargetSheet(ref, options.sheetName)) return { ok: true, address: formatReference(ref) };
+  const rows = rewriteAxisForMove(ref.start.row, ref.end.row, rowIndex, count, beforeRowIndex);
+  if (!rows) return { ok: false, address: '#REF!' };
+  return {
+    ok: true,
+    address: formatReference({
+      ...ref,
+      start: { ...ref.start, row: rows.start },
+      end: { ...ref.end, row: rows.end },
+    }),
+  };
+}
+
+export function rewriteReferenceForColumnMove(
+  address: string,
+  columnIndex: number,
+  count: number,
+  beforeColumnIndex: number,
+  options: ExcelReferenceRewriteOptions = {},
+): ExcelReferenceRewriteResult {
+  assertMoveArguments(columnIndex, count, beforeColumnIndex, 'column');
+  const ref = parseReference(address);
+  if (!isTargetSheet(ref, options.sheetName)) return { ok: true, address: formatReference(ref) };
+  const columns = rewriteAxisForMove(
+    ref.start.column,
+    ref.end.column,
+    columnIndex,
+    count,
+    beforeColumnIndex,
+  );
+  if (!columns) return { ok: false, address: '#REF!' };
+  return {
+    ok: true,
+    address: formatReference({
+      ...ref,
+      start: { ...ref.start, column: columns.start },
+      end: { ...ref.end, column: columns.end },
+    }),
+  };
+}
+
 function parseReference(address: string): RangeRef {
   const qualified = splitSheetQualifiedAddress(address);
   const parts = qualified.address.split(':');
@@ -336,6 +410,56 @@ function rewriteAxisForDelete(start: number, end: number, deletion: AxisDelete):
     start: Math.min(...survivors),
     end: Math.max(...survivors),
   };
+}
+
+export function moveAxisIndex(
+  value: number,
+  sourceIndex: number,
+  count: number,
+  beforeIndex: number,
+): number {
+  const sourceEnd = sourceIndex + count - 1;
+  if (beforeIndex >= sourceIndex && beforeIndex <= sourceEnd + 1) return value;
+  if (beforeIndex < sourceIndex) {
+    if (value >= sourceIndex && value <= sourceEnd) return beforeIndex + value - sourceIndex;
+    if (value >= beforeIndex && value < sourceIndex) return value + count;
+    return value;
+  }
+  if (value >= sourceIndex && value <= sourceEnd) {
+    return beforeIndex - count + value - sourceIndex;
+  }
+  if (value > sourceEnd && value < beforeIndex) return value - count;
+  return value;
+}
+
+function rewriteAxisForMove(
+  start: number,
+  end: number,
+  sourceIndex: number,
+  count: number,
+  beforeIndex: number,
+): { start: number; end: number } | null {
+  const moved = new Set<number>();
+  for (let value = start; value <= end; value += 1) {
+    moved.add(moveAxisIndex(value, sourceIndex, count, beforeIndex));
+  }
+  const values = [...moved].sort((a, b) => a - b);
+  if (values.length === 0) return null;
+  const first = values[0]!;
+  const last = values[values.length - 1]!;
+  if (last - first + 1 !== values.length) return null;
+  return { start: first, end: last };
+}
+
+function assertMoveArguments(
+  sourceIndex: number,
+  count: number,
+  beforeIndex: number,
+  axis: 'row' | 'column',
+): void {
+  assertPositiveInteger(sourceIndex, `${axis}Index`);
+  assertPositiveInteger(count, 'count');
+  assertPositiveInteger(beforeIndex, `before${axis === 'row' ? 'Row' : 'Column'}Index`);
 }
 
 function isTargetSheet(ref: RangeRef, sheetName: string | undefined): boolean {

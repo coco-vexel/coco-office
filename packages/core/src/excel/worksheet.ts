@@ -18,12 +18,17 @@ import {
   renameSheetInFormula,
   rewriteFormulaForColumnDelete,
   rewriteFormulaForColumnInsert,
+  rewriteFormulaForColumnMove,
   rewriteFormulaForRowDelete,
   rewriteFormulaForRowInsert,
+  rewriteFormulaForRowMove,
   rewriteReferenceForColumnDelete,
   rewriteReferenceForColumnInsert,
+  rewriteReferenceForColumnMove,
   rewriteReferenceForRowDelete,
   rewriteReferenceForRowInsert,
+  rewriteReferenceForRowMove,
+  moveAxisIndex,
   type ExcelReferenceRewriteResult,
 } from './reference-rewriter.js';
 
@@ -240,6 +245,113 @@ export class ExcelWorksheet {
       sheetId: this.model.id,
       sheetName: this.model.name,
       reason: 'worksheet.deleteColumns is not replayable by first-phase mutation writeback',
+    });
+  }
+
+  moveRows(rowIndex: number, count: number, beforeRowIndex: number): void {
+    assertMoveArguments(rowIndex, count, beforeRowIndex, 'row');
+    if (isMoveNoop(rowIndex, count, beforeRowIndex)) return;
+    for (const cell of this.model.cells) {
+      cell.row = moveAxisIndex(cell.row, rowIndex, count, beforeRowIndex);
+      cell.address = formatCellAddress(cell.row, cell.column);
+      if (cell.formula) {
+        cell.formula = rewriteFormulaForRowMove(cell.formula, rowIndex, count, beforeRowIndex, {
+          sheetName: this.model.name,
+        });
+      }
+    }
+    this.rewriteDefinedNames((text) =>
+      rewriteFormulaForRowMove(text, rowIndex, count, beforeRowIndex, {
+        sheetName: this.model.name,
+      }),
+    );
+    this.rewriteRuleFormulas((text) =>
+      rewriteFormulaForRowMove(text, rowIndex, count, beforeRowIndex, {
+        sheetName: this.model.name,
+      }),
+    );
+    this.rewriteChartFormulaRefs((text) =>
+      rewriteFormulaForRowMove(text, rowIndex, count, beforeRowIndex, {
+        sheetName: this.model.name,
+      }),
+    );
+    this.rewriteRangeReferences((address) =>
+      rewriteReferenceForRowMove(address, rowIndex, count, beforeRowIndex, {
+        sheetName: this.model.name,
+      }),
+    );
+    for (const row of this.model.rows) {
+      row.index = moveAxisIndex(row.index, rowIndex, count, beforeRowIndex);
+    }
+    for (const marker of this.drawingMarkers()) {
+      if (marker.row !== undefined) {
+        marker.row = moveAxisIndex(marker.row + 1, rowIndex, count, beforeRowIndex) - 1;
+      }
+    }
+    normalizeSheetCells(this.model);
+    this.recordMutation?.({
+      kind: 'unsafe',
+      scope: 'worksheet',
+      sheetId: this.model.id,
+      sheetName: this.model.name,
+      reason: 'worksheet.moveRows is not replayable by first-phase mutation writeback',
+    });
+  }
+
+  moveColumns(columnIndex: number, count: number, beforeColumnIndex: number): void {
+    assertMoveArguments(columnIndex, count, beforeColumnIndex, 'column');
+    if (isMoveNoop(columnIndex, count, beforeColumnIndex)) return;
+    for (const cell of this.model.cells) {
+      cell.column = moveAxisIndex(cell.column, columnIndex, count, beforeColumnIndex);
+      cell.address = formatCellAddress(cell.row, cell.column);
+      if (cell.formula) {
+        cell.formula = rewriteFormulaForColumnMove(
+          cell.formula,
+          columnIndex,
+          count,
+          beforeColumnIndex,
+          { sheetName: this.model.name },
+        );
+      }
+    }
+    this.rewriteDefinedNames((text) =>
+      rewriteFormulaForColumnMove(text, columnIndex, count, beforeColumnIndex, {
+        sheetName: this.model.name,
+      }),
+    );
+    this.rewriteRuleFormulas((text) =>
+      rewriteFormulaForColumnMove(text, columnIndex, count, beforeColumnIndex, {
+        sheetName: this.model.name,
+      }),
+    );
+    this.rewriteChartFormulaRefs((text) =>
+      rewriteFormulaForColumnMove(text, columnIndex, count, beforeColumnIndex, {
+        sheetName: this.model.name,
+      }),
+    );
+    this.rewriteRangeReferences((address) =>
+      rewriteReferenceForColumnMove(address, columnIndex, count, beforeColumnIndex, {
+        sheetName: this.model.name,
+      }),
+    );
+    this.model.columns = moveColumnMetadata(
+      this.model.columns,
+      columnIndex,
+      count,
+      beforeColumnIndex,
+    );
+    for (const marker of this.drawingMarkers()) {
+      if (marker.column !== undefined) {
+        marker.column = moveAxisIndex(marker.column + 1, columnIndex, count, beforeColumnIndex) - 1;
+      }
+    }
+    normalizeSheetCells(this.model);
+    this.recordMutation?.({
+      kind: 'unsafe',
+      scope: 'worksheet',
+      sheetId: this.model.id,
+      sheetName: this.model.name,
+      reason: 'worksheet.moveColumns is not replayable by first-phase mutation writeback',
     });
   }
 
@@ -566,6 +678,57 @@ function assertPositiveCount(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(`ExcelWorksheet: ${name} must be a positive integer`);
   }
+}
+
+function assertMoveArguments(
+  sourceIndex: number,
+  count: number,
+  beforeIndex: number,
+  axis: 'row' | 'column',
+): void {
+  assertPositiveIndex(sourceIndex, axis === 'row' ? 'rowIndex' : 'columnIndex');
+  assertPositiveCount(count, 'count');
+  assertPositiveIndex(beforeIndex, axis === 'row' ? 'beforeRowIndex' : 'beforeColumnIndex');
+}
+
+function isMoveNoop(sourceIndex: number, count: number, beforeIndex: number): boolean {
+  return beforeIndex >= sourceIndex && beforeIndex <= sourceIndex + count;
+}
+
+function moveColumnMetadata(
+  columns: ExcelSheetModel['columns'],
+  sourceIndex: number,
+  count: number,
+  beforeIndex: number,
+): ExcelSheetModel['columns'] {
+  const moved = columns.flatMap((column) => {
+    const out: ExcelSheetModel['columns'] = [];
+    for (let index = column.min; index <= column.max; index += 1) {
+      const next = moveAxisIndex(index, sourceIndex, count, beforeIndex);
+      out.push({ ...column, min: next, max: next });
+    }
+    return out;
+  });
+  moved.sort((a, b) => a.min - b.min);
+  const merged: ExcelSheetModel['columns'] = [];
+  for (const column of moved) {
+    const previous = merged[merged.length - 1];
+    if (previous && previous.max + 1 === column.min && sameColumnMetadata(previous, column)) {
+      previous.max = column.max;
+    } else {
+      merged.push({ ...column });
+    }
+  }
+  return merged;
+}
+
+function sameColumnMetadata(
+  left: ExcelSheetModel['columns'][number],
+  right: ExcelSheetModel['columns'][number],
+): boolean {
+  const { min: _leftMin, max: _leftMax, ...leftRest } = left;
+  const { min: _rightMin, max: _rightMax, ...rightRest } = right;
+  return JSON.stringify(leftRest) === JSON.stringify(rightRest);
 }
 
 function normalizeSheetCells(sheet: ExcelSheetModel): void {

@@ -102,6 +102,120 @@ function makeWorkbook() {
 }
 
 describe('ExcelWorksheet mutations', () => {
+  test('moves split employee columns before salary columns without rebuilding cell values', () => {
+    const workbook = ExcelWorkbook.fromModel({
+      sharedStrings: [],
+      definedNames: [],
+      styles: emptyStyles,
+      sheets: [
+        {
+          id: 'employee',
+          name: '员工工资',
+          dimension: 'A1:I2',
+          sheetViews: [],
+          columns: [
+            { min: 2, max: 2, width: 31 },
+            { min: 6, max: 9, width: 13 },
+          ],
+          rows: [],
+          mergedRanges: [],
+          hyperlinks: [],
+          tables: [],
+          dataValidations: [],
+          conditionalFormats: [],
+          comments: [],
+          threadedComments: [],
+          drawings: [],
+          charts: [],
+          images: [],
+          cells: [
+            ...['序号', '员工信息', '底薪', '绩效', '合计工资', '姓名', '性别', '年龄', '部门'].map(
+              (value, index) => ({
+                address: `${String.fromCharCode(65 + index)}1`,
+                row: 1,
+                column: index + 1,
+                kind: 'string' as const,
+                value,
+                styleId: index === 1 ? 6 : undefined,
+              }),
+            ),
+            { address: 'A2', row: 2, column: 1, kind: 'number', value: 1 },
+            {
+              address: 'B2',
+              row: 2,
+              column: 2,
+              kind: 'string',
+              value: '周予安（男，27岁，产品部）',
+            },
+            { address: 'C2', row: 2, column: 3, kind: 'number', value: 5280 },
+            { address: 'D2', row: 2, column: 4, kind: 'number', value: 760 },
+            { address: 'E2', row: 2, column: 5, kind: 'formula', value: null, formula: 'C2+D2' },
+            { address: 'F2', row: 2, column: 6, kind: 'string', value: '周予安' },
+            { address: 'G2', row: 2, column: 7, kind: 'string', value: '男' },
+            { address: 'H2', row: 2, column: 8, kind: 'number', value: 27 },
+            { address: 'I2', row: 2, column: 9, kind: 'string', value: '产品部' },
+          ],
+        },
+      ],
+    });
+    const sheet = workbook.worksheets.getItem('员工工资');
+
+    sheet.moveColumns(6, 4, 3);
+
+    expect(sheet.getRange('A1:I1').values()).toEqual([
+      ['序号', '员工信息', '姓名', '性别', '年龄', '部门', '底薪', '绩效', '合计工资'],
+    ]);
+    expect(sheet.getRange('A2:I2').values()).toEqual([
+      [1, '周予安（男，27岁，产品部）', '周予安', '男', 27, '产品部', 5280, 760, null],
+    ]);
+    expect(sheet.getCell('I2').formula()).toBe('G2+H2');
+    expect(sheet.getCell('B1').styleId()).toBe(6);
+    expect(sheet.columns().map((column) => [column.min, column.max, column.width])).toEqual([
+      [2, 2, 31],
+      [3, 6, 13],
+    ]);
+  });
+
+  test('moves rows as a structural block and rewrites formula references', () => {
+    const workbook = ExcelWorkbook.fromModel({
+      sharedStrings: [],
+      definedNames: [],
+      styles: emptyStyles,
+      sheets: [
+        {
+          ...makeSheet(),
+          rows: [{ index: 3, height: 22 }],
+          cells: [
+            { address: 'A1', row: 1, column: 1, kind: 'string', value: 'header' },
+            { address: 'A2', row: 2, column: 1, kind: 'number', value: 10 },
+            { address: 'A3', row: 3, column: 1, kind: 'number', value: 20 },
+            { address: 'B3', row: 3, column: 2, kind: 'formula', value: null, formula: 'A3*2' },
+          ],
+          mergedRanges: [],
+          hyperlinks: [],
+          tables: [],
+          dataValidations: [],
+          conditionalFormats: [],
+          comments: [],
+          threadedComments: [],
+          drawings: [],
+          charts: [],
+        },
+      ],
+    });
+    const sheet = workbook.worksheets.getItem('Grid');
+
+    sheet.moveRows(3, 1, 2);
+
+    expect(sheet.getRange('A1:B3').values()).toEqual([
+      ['header', null],
+      [20, null],
+      [10, null],
+    ]);
+    expect(sheet.getCell('B2').formula()).toBe('A2*2');
+    expect(sheet.rows()).toEqual([{ index: 2, height: 22 }]);
+  });
+
   test('inserts and deletes rows in the cell grid model', () => {
     const sheet = makeWorkbook().worksheets.getItem('Grid');
 
