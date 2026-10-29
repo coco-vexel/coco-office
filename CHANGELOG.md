@@ -2,6 +2,16 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.3] - 2026-10-29
+
+### Added
+
+- Added structural `moveRows` and `moveColumns` Excel APIs that preserve cell
+  values, formulas, styles and row or column metadata while updating supported
+  dependent references.
+- Documented structural move semantics and CodePlan guidance so whole-row and
+  whole-column reordering does not rebuild the worksheet data matrix.
+
 ## [1.0.2] - 2026-10-23
 
 ### Added
@@ -40,6 +50,7 @@ All notable changes to Coco Office are documented in this file.
 
 - Initial open-source release of Core, Editor and OOJSON packages.
 
+[1.0.3]: https://github.com/coco-vexel/coco-office/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/coco-vexel/coco-office/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/coco-vexel/coco-office/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/coco-vexel/coco-office/releases/tag/v1.0.0
