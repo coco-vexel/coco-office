@@ -13,10 +13,10 @@ importers:
   .:
     devDependencies:
       '@coco-vexel/coco-office':
-        specifier: workspace:^1.0.3
+        specifier: workspace:^1.0.4
         version: link:packages/core
       '@coco-vexel/coco-office-oojson':
-        specifier: workspace:^1.0.3
+        specifier: workspace:^1.0.4
         version: link:packages/oojson
       '@eslint/js':
         specifier: ^10.0.1
@@ -77,7 +77,7 @@ importers:
   packages/editor:
     dependencies:
       '@coco-vexel/coco-office':
-        specifier: workspace:^1.0.3
+        specifier: workspace:^1.0.4
         version: link:../core
       prosemirror-commands:
         specifier: ^1.7.2
@@ -99,7 +99,7 @@ importers:
         version: 1.42.6
     devDependencies:
       '@coco-vexel/coco-office-oojson':
-        specifier: workspace:^1.0.3
+        specifier: workspace:^1.0.4
         version: link:../oojson
       happy-dom:
         specifier: 20.11.2
@@ -117,7 +117,7 @@ importers:
   packages/oojson:
     dependencies:
       '@coco-vexel/coco-office':
-        specifier: workspace:^1.0.3
+        specifier: workspace:^1.0.4
         version: link:../core
 
 packages:

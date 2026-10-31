@@ -2,6 +2,15 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.4] - 2026-10-31
+
+### Fixed
+
+- Converted ISO 8601 SpreadsheetML date cells to Excel serial values so they
+  render, sort and calculate as dates instead of appearing blank.
+- Added 1904 date-system preservation and common built-in date/time number
+  formats, including correct handling of fractional-day values.
+
 ## [1.0.3] - 2026-10-29
 
 ### Added
@@ -50,6 +59,7 @@ All notable changes to Coco Office are documented in this file.
 
 - Initial open-source release of Core, Editor and OOJSON packages.
 
+[1.0.4]: https://github.com/coco-vexel/coco-office/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/coco-vexel/coco-office/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/coco-vexel/coco-office/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/coco-vexel/coco-office/compare/v1.0.0...v1.0.1

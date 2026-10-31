@@ -1,6 +1,6 @@
 {
   "name": "@coco-vexel/coco-office-editor",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -91,7 +91,7 @@
     "lint": "echo 'lint config pending' && exit 0"
   },
   "dependencies": {
-    "@coco-vexel/coco-office": "workspace:^1.0.3",
+    "@coco-vexel/coco-office": "workspace:^1.0.4",
     "prosemirror-commands": "^1.7.2",
     "prosemirror-keymap": "^1.2.3",
     "prosemirror-model": "^1.25.12",
@@ -104,6 +104,6 @@
     "jszip": "^3.10.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.3",
-    "@coco-vexel/coco-office-oojson": "workspace:^1.0.3"
+    "@coco-vexel/coco-office-oojson": "workspace:^1.0.4"
   }
 }
