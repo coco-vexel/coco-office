@@ -78,11 +78,12 @@ const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <border><left/><right/><top/><bottom/><diagonal/></border>
     <border><left style="thin"><color rgb="FF000000"/></left><right/><top/><bottom style="dashed"/><diagonal/></border>
   </borders>
-  <cellXfs count="2">
+  <cellXfs count="3">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="164" fontId="1" fillId="2" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">
       <alignment horizontal="center" vertical="top" wrapText="1"/>
     </xf>
+    <xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
   </cellXfs>
 </styleSheet>`;
 
@@ -209,11 +210,11 @@ const SHEET_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <drawing r:id="rId5"/>
 </worksheet>`;
 
-async function makeWorkbook(): Promise<Uint8Array> {
+async function makeWorkbook(worksheetXml = SHEET_XML, workbookXml = WORKBOOK_XML): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file('[Content_Types].xml', CT_XML);
   zip.file('_rels/.rels', ROOT_RELS);
-  zip.file('xl/workbook.xml', WORKBOOK_XML);
+  zip.file('xl/workbook.xml', workbookXml);
   zip.file('xl/_rels/workbook.xml.rels', WORKBOOK_RELS);
   zip.file('xl/worksheets/_rels/sheet1.xml.rels', SHEET_RELS);
   zip.file('xl/sharedStrings.xml', SHARED_STRINGS_XML);
@@ -225,7 +226,7 @@ async function makeWorkbook(): Promise<Uint8Array> {
   zip.file('xl/drawings/_rels/drawing1.xml.rels', DRAWING_RELS);
   zip.file('xl/charts/chart1.xml', CHART_XML);
   zip.file('xl/media/image1.png', new Uint8Array([137, 80, 78, 71]));
-  zip.file('xl/worksheets/sheet1.xml', SHEET_XML);
+  zip.file('xl/worksheets/sheet1.xml', worksheetXml);
   return await zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -269,6 +270,10 @@ describe('ExcelWorkbook', () => {
       applyBorder: true,
       applyAlignment: true,
       alignment: { horizontal: 'center', vertical: 'top', wrapText: true },
+    });
+    expect(model.styles.cellFormats[2]).toMatchObject({
+      numberFormatId: 14,
+      numberFormatCode: 'mm-dd-yy',
     });
     expect(model.styles.borders[0]).toEqual({});
     expect(model.sheets).toHaveLength(1);
@@ -464,6 +469,41 @@ describe('ExcelWorkbook', () => {
     expect(cells.A2).toMatchObject({ kind: 'number', value: 21 });
     expect(cells.C2).toMatchObject({ kind: 'formula', formula: 'A2*B2', value: 42, styleId: 1 });
     expect(cells.D2).toMatchObject({ kind: 'string', value: 'rich text', sharedStringIndex: 1 });
+  });
+
+  test('fromZip reads ISO date cells as Excel serial values without shifting offsets', async () => {
+    const worksheetXml = SHEET_XML.replace(
+      '</sheetData>',
+      `<row r="4">
+        <c r="A4" t="d"><v>2026-09-28T00:00:00.000Z</v></c>
+        <c r="B4" t="d"><v>2026-10-01T15:30:00+08:00</v></c>
+        <c r="C4" t="d"><v>1900-02-28</v></c>
+        <c r="D4" t="d"><v>not-a-date</v></c>
+      </row></sheetData>`,
+    );
+    const doc = await ExcelWorkbook.fromZip(await makeWorkbook(worksheetXml));
+    const cells = Object.fromEntries(doc.toModel().sheets[0]!.cells.map((cell) => [cell.address, cell]));
+
+    expect(cells.A4).toMatchObject({ kind: 'number', value: 46_293, dataType: 'd' });
+    expect(cells.B4).toMatchObject({ kind: 'number', value: 46_296.64583333333, dataType: 'd' });
+    expect(cells.C4).toMatchObject({ kind: 'number', value: 59, dataType: 'd' });
+    expect(cells.D4).toMatchObject({ kind: 'string', value: 'not-a-date', dataType: 'd' });
+  });
+
+  test('fromZip applies and preserves the 1904 date system', async () => {
+    const worksheetXml = SHEET_XML.replace(
+      '</sheetData>',
+      '<row r="4"><c r="A4" t="d"><v>1904-01-02</v></c></row></sheetData>',
+    );
+    const workbookXml = WORKBOOK_XML.replace('<sheets>', '<workbookPr date1904="1"/><sheets>');
+    const doc = await ExcelWorkbook.fromZip(await makeWorkbook(worksheetXml, workbookXml));
+
+    expect(doc.toModel().date1904).toBe(true);
+    expect(doc.worksheets.getItem('Sheet1').getCell('A4').value()).toBe(1);
+
+    doc.worksheets.getItem('Sheet1').insertRows(2);
+    const roundTripped = await ExcelWorkbook.fromZip(await doc.toZip());
+    expect(roundTripped.toModel().date1904).toBe(true);
   });
 
   test('parseCellAddress converts A1 notation to one-based coordinates', () => {

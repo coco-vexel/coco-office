@@ -107,6 +107,13 @@ describe('spreadsheet render model', () => {
   test('formats supported numeric values directly', () => {
     expect(formatSpreadsheetDisplayValue(1234, '#,##0.00')).toBe('1,234.00');
     expect(formatSpreadsheetDisplayValue(0.5, '0.00%')).toBe('50.00%');
+    expect(formatSpreadsheetDisplayValue(45292.75, 'yyyy-mm-dd')).toBe('2024-01-01');
+    expect(formatSpreadsheetDisplayValue(60, 'yyyy-mm-dd')).toBe('1900-02-29');
+    expect(formatSpreadsheetDisplayValue(1, 'yyyy-mm-dd', true)).toBe('1904-01-02');
+    expect(formatSpreadsheetDisplayValue(45292.5, 'mm-dd-yy')).toBe('01-01-24');
+    expect(formatSpreadsheetDisplayValue(45292.5, 'd-mmm-yy')).toBe('1-Jan-24');
+    expect(formatSpreadsheetDisplayValue(45292.5, 'h:mm AM/PM')).toBe('12:00 PM');
+    expect(formatSpreadsheetDisplayValue(45292.5, 'm/d/yy h:mm')).toBe('1/1/24 12:00');
   });
 
   test('resolves underline font style for canvas rendering', () => {

@@ -104,6 +104,13 @@ export function parseWorkbookSheets(pkg: Package): WorkbookSheetRef[] {
   });
 }
 
+export function parseWorkbookDate1904(pkg: Package): boolean {
+  const workbook = requireXmlPart(pkg, 'xl/workbook.xml');
+  const workbookPr = firstChildNs(workbook.xmlDom!.documentElement, SS_NS, 'workbookPr');
+  const value = workbookPr?.getAttribute('date1904');
+  return value === '1' || value === 'true';
+}
+
 export function parseDefinedNames(pkg: Package): ExcelDefinedNameModel[] {
   const workbookPart = requireXmlPart(pkg, 'xl/workbook.xml');
   const definedNameEls = workbookPart.xmlDom!.getElementsByTagNameNS(SS_NS, 'definedName');

@@ -20,6 +20,7 @@ import {
 export interface BuildSpreadsheetRenderModelOptions {
   minimumRows?: number;
   minimumColumns?: number;
+  date1904?: boolean;
   formulaResults?: Map<string, SpreadsheetFormulaResult>;
 }
 
@@ -50,7 +51,7 @@ export function buildSpreadsheetSheetRenderModel(
   }
 
   for (const cell of sheet.cells) {
-    const renderCell = toRenderCell(cell, styles, options.formulaResults);
+    const renderCell = toRenderCell(cell, styles, options.formulaResults, options.date1904);
     cellsByAddress.set(cell.address, renderCell);
     cellsByRowColumn.set(rowColumnKey(cell.row, cell.column), renderCell);
     maxRow = Math.max(maxRow, cell.row);
@@ -68,7 +69,7 @@ export function buildSpreadsheetSheetRenderModel(
       kind: 'formula',
       value: null,
     };
-    const renderCell = toRenderCell(virtualCell, styles, options.formulaResults);
+    const renderCell = toRenderCell(virtualCell, styles, options.formulaResults, options.date1904);
     cellsByAddress.set(address, renderCell);
     cellsByRowColumn.set(rowColumnKey(parsed.row, parsed.column), renderCell);
     maxRow = Math.max(maxRow, parsed.row);
@@ -132,6 +133,7 @@ function toRenderCell(
   cell: ExcelCellModel,
   styles: ExcelStylesModel,
   formulaResults?: Map<string, SpreadsheetFormulaResult>,
+  date1904 = false,
 ): SpreadsheetRenderCell {
   const formulaResult = formulaResults?.get(cell.address);
   const resultValue = formulaResult && !formulaResult.error ? formulaResult.value : undefined;
@@ -142,7 +144,7 @@ function toRenderCell(
     address: cell.address,
     kind: cell.kind,
     value,
-    displayText: cellToDisplayText(cell, styles, value, formulaResult),
+    displayText: cellToDisplayText(cell, styles, value, formulaResult, date1904),
     formula: cell.formula,
     styleId: cell.styleId,
     source: cell,
@@ -154,9 +156,10 @@ function cellToDisplayText(
   styles: ExcelStylesModel,
   value: ExcelCellModel['value'],
   formulaResult?: SpreadsheetFormulaResult,
+  date1904 = false,
 ): string {
   if (formulaResult?.error) return formulaResult.displayText;
-  if (value !== null) return formatSpreadsheetDisplayValue(value, numberFormatCodeForCell(cell, styles));
+  if (value !== null) return formatSpreadsheetDisplayValue(value, numberFormatCodeForCell(cell, styles), date1904);
   return '';
 }
 
@@ -167,13 +170,14 @@ function numberFormatCodeForCell(cell: ExcelCellModel, styles: ExcelStylesModel)
 export function formatSpreadsheetDisplayValue(
   value: ExcelCellModel['value'],
   formatCode: string | undefined,
+  date1904 = false,
 ): string {
   if (value === null) return '';
   if (typeof value !== 'number' || !formatCode) return String(value);
   const normalized = formatCode.toLowerCase();
   if (normalized.includes('%')) return `${formatFixedNumber(value * 100, decimalPlaces(formatCode))}%`;
   if (normalized.includes('$')) return `$${formatFixedNumber(value, decimalPlaces(formatCode), true)}`;
-  if (looksLikeDateFormat(normalized)) return formatExcelSerialDate(value);
+  if (looksLikeDateTimeFormat(normalized)) return formatExcelSerialDateTime(value, normalized, date1904);
   if (formatCode.includes(',')) return formatFixedNumber(value, decimalPlaces(formatCode), true);
   if (formatCode.includes('.')) return formatFixedNumber(value, decimalPlaces(formatCode));
   return String(value);
@@ -192,16 +196,77 @@ function formatFixedNumber(value: number, digits: number, grouping = false): str
   }).format(value);
 }
 
-function looksLikeDateFormat(formatCode: string): boolean {
-  return /(^|[^a-z])y{2,4}([^a-z]|$)/.test(formatCode) && /(^|[^a-z])d{1,2}([^a-z]|$)/.test(formatCode);
+function looksLikeDateTimeFormat(formatCode: string): boolean {
+  const knownFormats = [
+    'd-mmm',
+    'mmm-yy',
+    'h:mm am/pm',
+    'h:mm:ss am/pm',
+    'h:mm',
+    'h:mm:ss',
+    'mm:ss',
+    '[h]:mm:ss',
+    'mmss.0',
+  ];
+  if (knownFormats.includes(formatCode)) return true;
+  return (
+    /(^|[^a-z])y{2,4}([^a-z]|$)/.test(formatCode) &&
+    /(^|[^a-z])d{1,2}([^a-z]|$)/.test(formatCode)
+  );
 }
 
-function formatExcelSerialDate(serial: number): string {
+function formatExcelSerialDateTime(
+  serial: number,
+  formatCode: string,
+  date1904: boolean,
+): string {
   if (!Number.isFinite(serial)) return String(serial);
-  const epoch = Date.UTC(1899, 11, 30);
-  const date = new Date(epoch + Math.round(serial) * 86_400_000);
-  const year = date.getUTCFullYear();
-  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
+  const wholeDays = Math.floor(serial);
+  const dayFraction = serial - wholeDays;
+  const totalSeconds = Math.round(dayFraction * 86_400) % 86_400;
+  const hour = Math.floor(totalSeconds / 3_600);
+  const minute = Math.floor((totalSeconds % 3_600) / 60);
+  const second = totalSeconds % 60;
+  const hour12 = hour % 12 || 12;
+  const amPm = hour < 12 ? 'AM' : 'PM';
+  const pad = (value: number) => String(value).padStart(2, '0');
+
+  if (formatCode === 'h:mm am/pm') return `${hour12}:${pad(minute)} ${amPm}`;
+  if (formatCode === 'h:mm:ss am/pm') return `${hour12}:${pad(minute)}:${pad(second)} ${amPm}`;
+  if (formatCode === 'h:mm') return `${hour}:${pad(minute)}`;
+  if (formatCode === 'h:mm:ss') return `${hour}:${pad(minute)}:${pad(second)}`;
+  if (formatCode === 'mm:ss') return `${pad(minute)}:${pad(second)}`;
+  if (formatCode === '[h]:mm:ss') return `${Math.floor(serial * 24)}:${pad(minute)}:${pad(second)}`;
+  if (formatCode === 'mmss.0') return `${pad(minute)}${pad(second)}.0`;
+
+  const phantomLeapDay = !date1904 && wholeDays === 60;
+  const epoch = date1904 ? Date.UTC(1904, 0, 1) : Date.UTC(1899, 11, 30);
+  const date = new Date(epoch + wholeDays * 86_400_000);
+  const year = phantomLeapDay ? 1900 : date.getUTCFullYear();
+  const monthNumber = phantomLeapDay ? 2 : date.getUTCMonth() + 1;
+  const dayNumber = phantomLeapDay ? 29 : date.getUTCDate();
+  const month = pad(monthNumber);
+  const day = pad(dayNumber);
+  const shortYear = pad(year % 100);
+  const monthName = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ][monthNumber - 1]!;
+
+  if (formatCode === 'mm-dd-yy') return `${month}-${day}-${shortYear}`;
+  if (formatCode === 'd-mmm-yy') return `${dayNumber}-${monthName}-${shortYear}`;
+  if (formatCode === 'd-mmm') return `${dayNumber}-${monthName}`;
+  if (formatCode === 'mmm-yy') return `${monthName}-${shortYear}`;
+  if (formatCode === 'm/d/yy h:mm') return `${monthNumber}/${dayNumber}/${shortYear} ${hour}:${pad(minute)}`;
   return `${year}-${month}-${day}`;
 }

@@ -35,7 +35,7 @@ import type {
 import { parseCellAddress } from './address.js';
 import { parseStyles } from './styles-reader.js';
 import type { WorkbookSheetRef } from './workbook-reader.js';
-import { parseDefinedNames, parseSharedStrings, parseWorkbookSheets } from './workbook-reader.js';
+import { parseDefinedNames, parseSharedStrings, parseWorkbookDate1904, parseWorkbookSheets } from './workbook-reader.js';
 
 interface Relationship {
   id: string;
@@ -139,11 +139,58 @@ function parseBooleanAttr(raw: string | null): boolean | undefined {
   return raw === '1' || raw === 'true';
 }
 
+const EXCEL_1900_EPOCH_OFFSET_DAYS = 25_569;
+const EXCEL_1904_EPOCH_OFFSET_DAYS = 24_107;
+const MILLISECONDS_PER_DAY = 86_400_000;
+
+function parseIsoDateSerial(raw: string | undefined, date1904: boolean): number | null {
+  if (!raw) return null;
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:Z|[+-]\d{2}:\d{2})?)?$/.exec(
+      raw,
+    );
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4] ?? 0);
+  const minute = Number(match[5] ?? 0);
+  const second = Number(match[6] ?? 0);
+  const millisecond = Number((match[7] ?? '').padEnd(3, '0').slice(0, 3));
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return null;
+
+  // Spreadsheet dates are timezone-naive. Preserve the ISO wall-clock fields even
+  // when the serialized value includes an offset instead of shifting the date.
+  const timestamp = Date.UTC(year, month - 1, day, hour, minute, second, millisecond);
+  const date = new Date(timestamp);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day ||
+    date.getUTCHours() !== hour ||
+    date.getUTCMinutes() !== minute ||
+    date.getUTCSeconds() !== second ||
+    date.getUTCMilliseconds() !== millisecond
+  ) return null;
+
+  if (date1904) return timestamp / MILLISECONDS_PER_DAY + EXCEL_1904_EPOCH_OFFSET_DAYS;
+
+  let serial = timestamp / MILLISECONDS_PER_DAY + EXCEL_1900_EPOCH_OFFSET_DAYS;
+  // Excel reserves serial 60 for the fictitious 1900-02-29.
+  if (serial < 61) serial -= 1;
+  return serial;
+}
+
 function setIfDefined<T extends object, K extends keyof T>(target: T, key: K, value: T[K] | undefined): void {
   if (value !== undefined) target[key] = value;
 }
 
-function parseCell(cell: Element, sharedStrings: string[]): ExcelCellModel | null {
+function parseCell(
+  cell: Element,
+  sharedStrings: string[],
+  date1904: boolean,
+): ExcelCellModel | null {
   const address = cell.getAttribute('r');
   if (!address) return null;
   const { row, column } = parseCellAddress(address);
@@ -178,6 +225,10 @@ function parseCell(cell: Element, sharedStrings: string[]): ExcelCellModel | nul
   } else if (dataType === 'e') {
     value = rawValue ?? null;
     kind = 'error';
+  } else if (dataType === 'd') {
+    const serial = parseIsoDateSerial(rawValue, date1904);
+    value = serial ?? rawValue ?? null;
+    kind = formula ? 'formula' : serial === null ? 'string' : 'number';
   } else if (rawValue !== undefined) {
     value = parseNumber(rawValue);
     kind = formula ? 'formula' : 'number';
@@ -709,7 +760,12 @@ function parseSheetViews(sheetDom: Document): ExcelSheetViewModel[] {
   return views;
 }
 
-function parseSheet(pkg: Package, ref: WorkbookSheetRef, sharedStrings: string[]): ExcelSheetModel {
+function parseSheet(
+  pkg: Package,
+  ref: WorkbookSheetRef,
+  sharedStrings: string[],
+  date1904: boolean,
+): ExcelSheetModel {
   if (!ref.path) {
     return {
       ...ref,
@@ -753,7 +809,7 @@ function parseSheet(pkg: Package, ref: WorkbookSheetRef, sharedStrings: string[]
   const cellEls = part.xmlDom.getElementsByTagNameNS(SS_NS, 'c');
   const cells: ExcelCellModel[] = [];
   for (let i = 0; i < cellEls.length; i++) {
-    const parsed = cellEls[i] ? parseCell(cellEls[i]!, sharedStrings) : null;
+    const parsed = cellEls[i] ? parseCell(cellEls[i]!, sharedStrings, date1904) : null;
     if (parsed) cells.push(parsed);
   }
   const drawingInfo = parseDrawings(pkg, ref.path, part.xmlDom);
@@ -780,10 +836,12 @@ function parseSheet(pkg: Package, ref: WorkbookSheetRef, sharedStrings: string[]
 export function readWorkbookModel(pkg: Package): ExcelWorkbookModel {
   const sharedStrings = parseSharedStrings(pkg);
   const sheetRefs = parseWorkbookSheets(pkg);
+  const date1904 = parseWorkbookDate1904(pkg);
   return {
+    date1904,
     sharedStrings,
     definedNames: parseDefinedNames(pkg),
     styles: parseStyles(pkg),
-    sheets: sheetRefs.map((sheet) => parseSheet(pkg, sheet, sharedStrings)),
+    sheets: sheetRefs.map((sheet) => parseSheet(pkg, sheet, sharedStrings, date1904)),
   };
 }

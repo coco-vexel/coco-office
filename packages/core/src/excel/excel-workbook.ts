@@ -112,6 +112,7 @@ export class ExcelWorkbookCore {
 
 function structuredCloneModel(model: ExcelWorkbookModel): ExcelWorkbookModel {
   return {
+    date1904: model.date1904,
     sharedStrings: [...model.sharedStrings],
     definedNames: model.definedNames.map((name) => ({ ...name })),
     styles: cloneStyles(model.styles),

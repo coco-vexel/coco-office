@@ -328,6 +328,18 @@ function builtInNumberFormatCode(id: number): string | undefined {
     4: '#,##0.00',
     9: '0%',
     10: '0.00%',
+    14: 'mm-dd-yy',
+    15: 'd-mmm-yy',
+    16: 'd-mmm',
+    17: 'mmm-yy',
+    18: 'h:mm AM/PM',
+    19: 'h:mm:ss AM/PM',
+    20: 'h:mm',
+    21: 'h:mm:ss',
+    22: 'm/d/yy h:mm',
+    45: 'mm:ss',
+    46: '[h]:mm:ss',
+    47: 'mmss.0',
   };
   return builtIns[id];
 }

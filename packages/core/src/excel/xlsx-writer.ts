@@ -522,9 +522,10 @@ function syncWorkbookPart(pkg: Package, model: ExcelWorkbookModel): void {
         })
         .join('')}</definedNames>`
     : '';
+  const workbookPropertiesXml = model.date1904 ? '<workbookPr date1904="1"/>' : '';
   replacePartXml(
     part,
-    `${XML_DECL}<workbook xmlns="${SS_NS}" xmlns:r="${OFFICE_REL_NS}"><sheets>${sheetsXml}</sheets>${definedNamesXml}</workbook>`,
+    `${XML_DECL}<workbook xmlns="${SS_NS}" xmlns:r="${OFFICE_REL_NS}">${workbookPropertiesXml}<sheets>${sheetsXml}</sheets>${definedNamesXml}</workbook>`,
   );
 }
 

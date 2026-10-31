@@ -377,6 +377,8 @@ export interface ExcelDefinedNameModel {
 }
 
 export interface ExcelWorkbookModel {
+  /** True when workbook dates use the 1904 date system instead of Excel's default 1900 system. */
+  date1904?: boolean;
   sheets: ExcelSheetModel[];
   sharedStrings: string[];
   definedNames: ExcelDefinedNameModel[];

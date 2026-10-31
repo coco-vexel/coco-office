@@ -126,7 +126,10 @@ export class SpreadsheetEditorRuntime {
       activeSheetName: firstSheet.name,
       formulaResults,
       formulaEngine,
-      activeSheet: buildSpreadsheetSheetRenderModel(firstSheet, model.styles, { formulaResults }),
+      activeSheet: buildSpreadsheetSheetRenderModel(firstSheet, model.styles, {
+        formulaResults,
+        date1904: model.date1904,
+      }),
     }, options);
   }
 
@@ -242,6 +245,7 @@ export class SpreadsheetEditorRuntime {
     this.state.formulaEngine = formulaEngine;
     this.state.activeSheet = buildSpreadsheetSheetRenderModel(sheet, this.state.model.styles, {
       formulaResults,
+      date1904: this.state.model.date1904,
     });
   }
 
@@ -305,7 +309,10 @@ export class SpreadsheetEditorRuntime {
       activeSheetName: sheet.name,
       formulaResults,
       formulaEngine,
-      activeSheet: buildSpreadsheetSheetRenderModel(sheet, model.styles, { formulaResults }),
+      activeSheet: buildSpreadsheetSheetRenderModel(sheet, model.styles, {
+        formulaResults,
+        date1904: model.date1904,
+      }),
     };
   }
 
@@ -913,7 +920,7 @@ export class SpreadsheetEditorRuntime {
     this.state.activeSheet = buildSpreadsheetSheetRenderModel(
       this.state.activeSheet.source,
       this.state.model.styles,
-      { formulaResults: this.state.formulaResults },
+      { formulaResults: this.state.formulaResults, date1904: this.state.model.date1904 },
     );
   }
 
