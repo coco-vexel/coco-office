@@ -244,8 +244,37 @@ function fontFamilyToCss(fontFamily: string): string {
     .split(',')
     .map((family) => family.trim())
     .filter((family) => family.length > 0);
-  const quotedFamilies = families.map((family) =>
-    `"${family.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n\f]/g, ' ')}"`,
-  );
-  return [...quotedFamilies, 'SimSun', '"Songti SC"', '"Noto Serif CJK SC"', 'serif'].join(', ');
+  const fallbacks = chineseFontFallbacks(families);
+  const uniqueFamilies = [...new Set([...families, ...fallbacks.families])];
+  return [...uniqueFamilies.map(quoteFontFamily), fallbacks.generic].join(', ');
+}
+
+function chineseFontFallbacks(families: string[]): { families: string[]; generic: 'serif' | 'sans-serif' } {
+  const requested = families.join(' ');
+  if (/(?:楷体|kaiti|stkaiti)/i.test(requested)) {
+    return {
+      families: ['Kaiti SC', 'STKaiti', 'KaiTi', 'KaiTi_GB2312', 'DFKai-SB'],
+      generic: 'serif',
+    };
+  }
+  if (/(?:仿宋|fangsong|stfangsong)/i.test(requested)) {
+    return {
+      families: ['STFangsong', 'FangSong', 'FangSong_GB2312', 'Noto Serif CJK SC'],
+      generic: 'serif',
+    };
+  }
+  if (/(?:黑体|heiti|simhei|微软雅黑|microsoft yahei|pingfang)/i.test(requested)) {
+    return {
+      families: ['STHeiti', 'Heiti SC', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC'],
+      generic: 'sans-serif',
+    };
+  }
+  return {
+    families: ['SimSun', 'Songti SC', 'STSong', 'Noto Serif CJK SC'],
+    generic: 'serif',
+  };
+}
+
+function quoteFontFamily(family: string): string {
+  return `"${family.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n\f]/g, ' ')}"`;
 }

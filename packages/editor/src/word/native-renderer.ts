@@ -2354,7 +2354,9 @@ function renderNativeDrawing(child: NativeWordDrawingNode): HTMLElement {
   if (child.hasFill) drawing.classList.add('has-fill');
   if (child.isLineOrConnector) {
     drawing.classList.add('is-line-or-connector');
-    drawing.classList.add(isVerticalLine(child) ? 'is-vertical-line' : 'is-horizontal-line');
+    const stroke = nativeLineStrokeStyle(child);
+    drawing.classList.add(stroke.vertical ? 'is-vertical-line' : 'is-horizontal-line');
+    drawing.style[stroke.property] = stroke.value;
   }
   const hasVisibleText =
     (child.text?.trim().length ?? 0) > 0 ||
@@ -2393,8 +2395,19 @@ function renderNativeDrawing(child: NativeWordDrawingNode): HTMLElement {
   return drawing;
 }
 
-function isVerticalLine(child: NativeWordDrawingNode): boolean {
+function isVerticalLine(child: Pick<NativeWordDrawingNode, 'width' | 'height'>): boolean {
   return (child.height ?? 0) > Math.max(1, (child.width ?? 0) * 2);
+}
+
+export function nativeLineStrokeStyle(
+  child: Pick<NativeWordDrawingNode, 'width' | 'height' | 'strokeColor' | 'strokeWidth'>,
+): { vertical: boolean; property: 'borderLeft' | 'borderTop'; value: string } {
+  const vertical = isVerticalLine(child);
+  return {
+    vertical,
+    property: vertical ? 'borderLeft' : 'borderTop',
+    value: `${child.strokeWidth ?? 1}px solid ${child.strokeColor ?? '#111827'}`,
+  };
 }
 
 function shouldApplyDrawingMinHeight(child: NativeWordDrawingNode): boolean {

@@ -192,6 +192,22 @@ const TEMPLATE_FIELD_TEXT_BOX_DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-
   </w:body>
 </w:document>`;
 
+const VML_LINE_DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}" xmlns:v="urn:schemas-microsoft-com:vml">
+  <w:body>
+    <w:p w14:paraId="VMLLINE1">
+      <w:pPr><w:jc w:val="center"/></w:pPr>
+      <w:r>
+        <w:pict>
+          <v:line style="position:absolute;margin-top:3.25pt;height:0.05pt;width:444.75pt" filled="f" stroked="t">
+            <v:stroke weight="2pt" color="#FF0000"/>
+          </v:line>
+        </w:pict>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>`;
+
 const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="${W_NS}">
   <w:docDefaults>
@@ -807,6 +823,32 @@ describe('@coco-vexel/coco-office-editor word spike', () => {
         hasFill: true,
       }),
     );
+  });
+
+  test('extracts legacy VML horizontal lines with their size and stroke', async () => {
+    const pkg = await fromZip(await makeTemplateFieldTextBoxFixtureZip(VML_LINE_DOCUMENT_XML));
+    const view = buildWordEditorViewFromPackage(pkg, buildIndices(pkg));
+
+    expect(view.paragraphs[0]).toMatchObject({
+      paraId: 'VMLLINE1',
+      text: '\uFFFC',
+      segments: [
+        {
+          kind: 'drawing',
+          drawingId: 'VMLLINE1:vml-line:1',
+          drawingKind: 'shape',
+          isLineOrConnector: true,
+          hasBorder: true,
+          strokeColor: '#FF0000',
+        },
+      ],
+    });
+    const line = view.paragraphs[0]!.segments[0];
+    expect(line).toMatchObject({ kind: 'drawing' });
+    if (line?.kind !== 'drawing') throw new Error('VML line was not projected as a drawing');
+    expect(line.width).toBeCloseTo(593, 5);
+    expect(line.height).toBeCloseTo(0.0666667, 5);
+    expect(line.strokeWidth).toBeCloseTo(2.6666667, 5);
   });
 
   test('applies docDefaults, default paragraph style and direct paragraph formatting in order', async () => {

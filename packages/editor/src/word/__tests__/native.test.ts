@@ -54,6 +54,7 @@ import {
   type NativeWordDocument,
 } from '../native.js';
 import type { EditorDocumentView } from '../model.js';
+import { nativeLineStrokeStyle } from '../native-renderer.js';
 
 function createView(): EditorDocumentView {
   return {
@@ -828,6 +829,45 @@ describe('@coco-vexel/coco-office-editor native word POC', () => {
           wrap: 'square',
         },
       ],
+    });
+  });
+
+  test('preserves and resolves line drawing stroke width and color', () => {
+    const view = createView();
+    const paragraph = view.blocks[0];
+    if (paragraph?.type !== 'paragraph') throw new Error('paragraph fixture missing');
+    paragraph.text = '\uFFFC';
+    paragraph.segments = [
+      {
+        kind: 'drawing',
+        from: 0,
+        to: 1,
+        drawingId: 'vml-line-1',
+        drawingKind: 'shape',
+        width: 593,
+        height: 0.0666667,
+        isLineOrConnector: true,
+        hasBorder: true,
+        strokeColor: '#FF0000',
+        strokeWidth: 2.6666667,
+      },
+    ];
+
+    const doc = createNativeWordDocument(view);
+    const block = doc.blocks[0];
+    if (block?.kind !== 'paragraph') throw new Error('native paragraph missing');
+    const line = block.content[0];
+
+    expect(line).toMatchObject({
+      kind: 'drawing',
+      strokeColor: '#FF0000',
+      strokeWidth: 2.6666667,
+    });
+    if (line?.kind !== 'drawing') throw new Error('native line drawing missing');
+    expect(nativeLineStrokeStyle(line)).toEqual({
+      vertical: false,
+      property: 'borderTop',
+      value: '2.6666667px solid #FF0000',
     });
   });
 
@@ -1850,12 +1890,21 @@ describe('@coco-vexel/coco-office-editor native word POC', () => {
     expect(resolveRunStyle({ bold: true, color: '00AA00', fontSize: 14, fontFamily: '黑体' }).declarations).toMatchObject({
       'font-weight': '700',
       'font-size': '14pt',
-      'font-family': '"黑体", SimSun, "Songti SC", "Noto Serif CJK SC", serif',
+      'font-family': '"黑体", "STHeiti", "Heiti SC", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif',
       color: '#00AA00',
     });
     expect(resolveRunStyle({ fontFamily: 'Bad\\";color:red\nNext' }).declarations).toMatchObject({
-      'font-family': '"Bad\\\\\\";color:red Next", SimSun, "Songti SC", "Noto Serif CJK SC", serif',
+      'font-family': '"Bad\\\\\\";color:red Next", "SimSun", "Songti SC", "STSong", "Noto Serif CJK SC", serif',
     });
+    expect(resolveRunStyle({ fontFamily: '楷体_GB2312' }).declarations['font-family']).toContain(
+      '"Kaiti SC", "STKaiti", "KaiTi"',
+    );
+    expect(resolveRunStyle({ fontFamily: '仿宋_GB2312' }).declarations['font-family']).toContain(
+      '"STFangsong", "FangSong", "FangSong_GB2312"',
+    );
+    expect(resolveRunStyle({ fontFamily: '宋体' }).declarations['font-family']).toContain(
+      '"SimSun", "Songti SC", "STSong"',
+    );
     expect(resolveRunStyle({ shading: { fill: 'D9EAF7' } }).declarations).toMatchObject({
       'background-color': '#D9EAF7',
     });

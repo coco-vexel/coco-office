@@ -96,6 +96,8 @@ export interface EditorDrawingSegment {
   hasBorder?: boolean;
   hasFill?: boolean;
   isLineOrConnector?: boolean;
+  strokeColor?: string;
+  strokeWidth?: number;
   innerTextAlign?: string;
   paragraphs?: EditorParagraphView[];
 }

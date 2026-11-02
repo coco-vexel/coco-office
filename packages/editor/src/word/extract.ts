@@ -50,6 +50,7 @@ import type {
 const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const RELS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+const VML_NS = 'urn:schemas-microsoft-com:vml';
 const DEFAULT_TABLE_LOOK: Required<Pick<
   EditorTableLook,
   'firstRow' | 'lastRow' | 'firstColumn' | 'lastColumn' | 'noHorizontalBand' | 'noVerticalBand'
@@ -1231,6 +1232,8 @@ function extractParagraphContent(
   const spans: EditorParagraphSpan[] = [];
   const activeComments = new Map<number, number>();
   const consumedDrawingIds = new Set<string>();
+  const consumedVmlDrawings = new Set<Element>();
+  let vmlDrawingIndex = 0;
   let activeField: ActiveComplexField | null = null;
   let text = '';
   const collectParagraphVisibleText = (root: Element): string =>
@@ -1517,6 +1520,16 @@ function extractParagraphContent(
   }
 
   function appendDrawing(source: Element): void {
+    if (source.namespaceURI === W_NS && source.localName === 'pict') {
+      const vmlLine = buildVmlLineSegment(source, paraId, vmlDrawingIndex);
+      if (!vmlLine) return;
+      if (consumedVmlDrawings.has(source)) return;
+      consumedVmlDrawings.add(source);
+      vmlDrawingIndex += 1;
+      const { from, to } = appendText('\uFFFC');
+      segments.push({ ...vmlLine, from, to });
+      return;
+    }
     const drawingId = context.drawingIdByElement.get(source);
     const image = drawingId ? context.imagesByDrawingId.get(drawingId) : undefined;
     const drawing = drawingId ? context.drawingInfoById.get(drawingId) : undefined;
@@ -1548,13 +1561,20 @@ function extractParagraphContent(
   }
 
   function appendUnconsumedDescendantDrawings(source: Element): void {
-    const drawings = source.getElementsByTagNameNS(W_NS, 'drawing');
-    for (let i = 0; i < drawings.length; i++) {
-      const drawing = drawings[i];
-      if (!drawing) continue;
-      const drawingId = context.drawingIdByElement.get(drawing);
-      if (!drawingId || consumedDrawingIds.has(drawingId)) continue;
-      appendDrawing(drawing);
+    for (const localName of ['drawing', 'pict'] as const) {
+      const drawings = source.getElementsByTagNameNS(W_NS, localName);
+      for (let i = 0; i < drawings.length; i++) {
+        const drawing = drawings[i];
+        if (!drawing) continue;
+        if (localName === 'pict') {
+          if (consumedVmlDrawings.has(drawing)) continue;
+          appendDrawing(drawing);
+          continue;
+        }
+        const drawingId = context.drawingIdByElement.get(drawing);
+        if (!drawingId || consumedDrawingIds.has(drawingId)) continue;
+        appendDrawing(drawing);
+      }
     }
   }
 
@@ -2972,12 +2992,79 @@ function directDrawingChildren(el: Element): Element[] {
     if (
       child?.nodeType === 1 &&
       (child as Element).namespaceURI === W_NS &&
-      (child as Element).localName === 'drawing'
+      ((child as Element).localName === 'drawing' || (child as Element).localName === 'pict')
     ) {
       drawings.push(child as Element);
     }
   }
   return drawings;
+}
+
+function buildVmlLineSegment(
+  source: Element,
+  paraId: string,
+  index: number,
+): Omit<EditorDrawingSegment, 'from' | 'to'> | null {
+  if (source.namespaceURI !== W_NS || source.localName !== 'pict') return null;
+  const line = source.getElementsByTagNameNS(VML_NS, 'line')[0];
+  if (!line) return null;
+
+  const style = parseVmlStyle(line.getAttribute('style'));
+  const stroke = line.getElementsByTagNameNS(VML_NS, 'stroke')[0];
+  const width = vmlLengthToCssPixels(style.get('width'));
+  const height = vmlLengthToCssPixels(style.get('height'));
+  const strokeColor = normalizeVmlColor(
+    stroke?.getAttribute('color') ?? line.getAttribute('strokecolor'),
+  );
+  const strokeWidth = vmlLengthToCssPixels(
+    stroke?.getAttribute('weight') ?? line.getAttribute('strokeweight'),
+  );
+
+  return {
+    kind: 'drawing',
+    drawingId: `${paraId}:vml-line:${index + 1}`,
+    drawingKind: 'shape',
+    isLineOrConnector: true,
+    hasBorder: true,
+    ...(width !== undefined ? { width } : {}),
+    ...(height !== undefined ? { height } : {}),
+    ...(strokeColor ? { strokeColor } : {}),
+    ...(strokeWidth !== undefined ? { strokeWidth } : {}),
+  };
+}
+
+function parseVmlStyle(value: string | null): Map<string, string> {
+  const declarations = new Map<string, string>();
+  for (const part of value?.split(';') ?? []) {
+    const separator = part.indexOf(':');
+    if (separator < 0) continue;
+    const property = part.slice(0, separator).trim().toLowerCase();
+    const propertyValue = part.slice(separator + 1).trim();
+    if (property && propertyValue) declarations.set(property, propertyValue);
+  }
+  return declarations;
+}
+
+function vmlLengthToCssPixels(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const match = /^(-?(?:\d+\.?\d*|\.\d+))(pt|px|in|cm|mm)?$/i.exec(value.trim());
+  if (!match) return undefined;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) return undefined;
+  const unit = match[2]?.toLowerCase() ?? 'px';
+  if (unit === 'pt') return amount * (96 / 72);
+  if (unit === 'in') return amount * 96;
+  if (unit === 'cm') return amount * (96 / 2.54);
+  if (unit === 'mm') return amount * (96 / 25.4);
+  return amount;
+}
+
+function normalizeVmlColor(value: string | null): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim();
+  if (/^#[0-9a-f]{6}$/i.test(normalized)) return normalized.toUpperCase();
+  if (/^[0-9a-f]{6}$/i.test(normalized)) return `#${normalized.toUpperCase()}`;
+  return undefined;
 }
 
 function isMarkerOnlyRun(run: Element): boolean {

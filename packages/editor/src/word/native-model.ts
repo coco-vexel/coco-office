@@ -92,6 +92,8 @@ export interface NativeWordDrawingNode {
   hasBorder?: boolean;
   hasFill?: boolean;
   isLineOrConnector?: boolean;
+  strokeColor?: string;
+  strokeWidth?: number;
   innerTextAlign?: string;
   paragraphs?: NativeWordParagraphNode[];
 }
@@ -569,6 +571,8 @@ function drawingNodeFromSegment(segment: EditorDrawingSegment): NativeWordDrawin
   if (segment.hasBorder !== undefined) node.hasBorder = segment.hasBorder;
   if (segment.hasFill !== undefined) node.hasFill = segment.hasFill;
   if (segment.isLineOrConnector !== undefined) node.isLineOrConnector = segment.isLineOrConnector;
+  if (segment.strokeColor !== undefined) node.strokeColor = segment.strokeColor;
+  if (segment.strokeWidth !== undefined) node.strokeWidth = segment.strokeWidth;
   if (segment.innerTextAlign !== undefined) node.innerTextAlign = segment.innerTextAlign;
   if (segment.paragraphs && segment.paragraphs.length > 0) {
     node.paragraphs = segment.paragraphs.map((paragraph) => nativeParagraphFromEditorParagraph(paragraph));
