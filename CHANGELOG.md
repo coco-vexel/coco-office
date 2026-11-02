@@ -2,6 +2,15 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.5] - 2026-11-02
+
+### Fixed
+
+- Rendered legacy Word VML horizontal lines with their original width, stroke
+  color and weight in the browser editor.
+- Added category-aware Chinese font fallbacks so Heiti, Kaiti, Fangsong and
+  Songti document fonts retain a closer visual match across platforms.
+
 ## [1.0.4] - 2026-10-31
 
 ### Fixed
@@ -59,6 +68,7 @@ All notable changes to Coco Office are documented in this file.
 
 - Initial open-source release of Core, Editor and OOJSON packages.
 
+[1.0.5]: https://github.com/coco-vexel/coco-office/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/coco-vexel/coco-office/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/coco-vexel/coco-office/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/coco-vexel/coco-office/compare/v1.0.1...v1.0.2
