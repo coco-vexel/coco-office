@@ -102,8 +102,8 @@
   "devDependencies": {
     "happy-dom": "20.11.2",
     "jszip": "^3.10.2",
-    "vite": "^8.3.4",
-    "vitest": "^5.0.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
     "@coco-vexel/coco-office-oojson": "workspace:^1.0.6"
   }
 }
