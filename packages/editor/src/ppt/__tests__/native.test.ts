@@ -1862,7 +1862,8 @@ describe('renderNativePptEditor', () => {
     expect(node.style.getPropertyValue('-webkit-text-fill-color')).toBe('');
     expect(spans[0]!.style.color).toBe('#000000');
     expect(spans[0]!.style.getPropertyValue('-webkit-text-fill-color')).toBe('');
-    expect(spans[1]!.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
+    expect(spans[1]!.style.backgroundImage).toContain('linear-gradient');
+    expect(spans[1]!.style.color).toBe('transparent');
 
     await editor.destroy();
   });
@@ -5619,8 +5620,8 @@ describe('renderNativePptEditor', () => {
     )!;
 
     expect(node.style.backgroundImage).toContain('linear-gradient');
+    expect(node.style.backgroundClip).toBe('text');
     expect(node.style.color).toBe('transparent');
-    expect(node.style.getPropertyValue('-webkit-text-fill-color')).toBe('transparent');
     expect(node.style.textShadow).toContain('rgba(255, 255, 255, 0.5)');
 
     await editor.destroy();
