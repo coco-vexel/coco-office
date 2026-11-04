@@ -110,6 +110,7 @@ export {
   type TextRange as TextRangeDescriptor,
   type RevisionScope,
   type InsertParagraphSpec,
+  type BodyStartParagraphSpec,
   type ParaId,
   type RevisionId,
 } from './plan.js';

@@ -4,6 +4,7 @@ export * from './extract.js';
 export * from './runtime.js';
 export * from './coverage.js';
 export * from './style-resolver.js';
+export * from './normalized-html.js';
 export * from './native-model.js';
 export * from './native-table-pagination.js';
 export * from './native-commands.js';

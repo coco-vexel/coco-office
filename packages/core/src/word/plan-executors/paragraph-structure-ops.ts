@@ -397,7 +397,7 @@ function applyColorToDirectRuns(paragraph: Element, color: string): void {
  */
 export function executeInsertParagraphAtBodyStart(
   ctx: ExecutorContext,
-  _op: Extract<Op, { type: 'insertParagraphAtBodyStart' }>,
+  op: Extract<Op, { type: 'insertParagraphAtBodyStart' }>,
 ): void {
   const [bodyStory] = listStories(ctx.pkg, { kinds: ['body'] });
   if (!bodyStory) {
@@ -421,6 +421,36 @@ export function executeInsertParagraphAtBodyStart(
   const newId = generateParaId(seen);
   const newPara = doc.createElementNS(W_NS, 'w:p');
   newPara.setAttributeNS(W14_NS, 'w14:paraId', newId);
+
+  const style = op.spec?.style;
+  if (style !== undefined && style !== 'inherit') {
+    const pPr = createW(doc, 'pPr');
+    const pStyle = createW(doc, 'pStyle');
+    pStyle.setAttributeNS(W_NS, 'w:val', style);
+    pPr.appendChild(pStyle);
+    newPara.appendChild(pPr);
+  }
+
+  if (op.spec !== undefined) {
+    // An empty body has no paragraph/run from which `inherit` could copy, so
+    // inherited formatting intentionally falls back to document defaults.
+    appendTextAsRuns(newPara, op.spec.text);
+    if (ctx.options.trackChanges) {
+      const runs = Array.from(newPara.childNodes).filter(
+        (node): node is Element =>
+          node.nodeType === 1 &&
+          (node as Element).namespaceURI === W_NS &&
+          (node as Element).localName === 'r',
+      );
+      if (runs.length > 0) {
+        const attrs: RevisionAttrs = { author: ctx.options.author, date: ctx.options.date };
+        const insEl = wrapRunsAsInsert(runs, allocateRevisionId(ctx.pkg), attrs);
+        for (const run of runs) newPara.removeChild(run);
+        newPara.appendChild(insEl);
+        ensureParaMarkInsert(newPara, allocateRevisionId(ctx.pkg), attrs);
+      }
+    }
+  }
 
   // 插到 body 第一个子元素之前（body 为空时 firstChild=null → appendChild 语义）。
   body.insertBefore(newPara, body.firstChild);

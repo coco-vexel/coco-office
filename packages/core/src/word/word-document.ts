@@ -531,11 +531,12 @@ export class WordDocument {
     const last = paragraphs[paragraphs.length - 1];
     if (last) return last.insertAfter(text, opts);
 
-    const result = await this.plan(opts).insertParagraphAtBodyStart().apply();
-    const newParaId = result.insertedBodyStartParaIds[0];
-    if (!newParaId) return result;
-    const paragraph = await this.paragraphs.get(newParaId);
-    return paragraph ? paragraph.replaceWith(text, opts) : result;
+    const spec: { text: string; style?: 'inherit' | string; runFormat?: 'inherit' | 'default' } = {
+      text,
+    };
+    if (opts.style !== undefined) spec.style = opts.style;
+    if (opts.runFormat !== undefined) spec.runFormat = opts.runFormat;
+    return this.plan(opts).insertParagraphAtBodyStart(spec).apply();
   }
 
   /** @internal 仅 inline 模式可用(Package 跨 Worker 边界不可直接引用)*/

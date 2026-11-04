@@ -6,7 +6,7 @@ Use this document when the task says: paragraph, title, heading, body text, inse
 
 ## Skill Summary
 
-Paragraph APIs are live-object APIs. `doc.paragraphs.list()` returns `Paragraph` handles, not raw `ParagraphInfo` data. A handle has stable identity fields (`id`, `paraId`, `story`) and methods that read or write the current document state.
+Paragraph APIs are live-object APIs. `doc.paragraphs.list()` returns a `ParagraphList` object whose `paragraphs` field contains `Paragraph` handles, not a directly iterable array and not raw `ParagraphInfo` data. Always destructure it as `const { paragraphs } = await doc.paragraphs.list(...)` before iterating. A handle has stable identity fields (`id`, `paraId`, `story`) and methods that read or write the current document state.
 
 Prefer paragraph live-object methods for generated code. Do not generate `doc.plan().formatParagraph(...)` unless you are explicitly writing low-level plan code.
 
@@ -234,7 +234,7 @@ await paragraph?.insertTableAfter({
 
 ## CodeAgent Rules
 
-1. For ordinary document editing, use live objects: `doc.paragraphs.list/get` then `paragraph.*`.
+1. For ordinary document editing, use live objects: `doc.paragraphs.list/get` then `paragraph.*`. Always destructure `{ paragraphs }` from `doc.paragraphs.list()`; never iterate its direct `ParagraphList` return value.
 2. Use `{ pagination: { mode: 'all' } }` only when the user explicitly asks for whole-document work.
 3. `paragraph.findText()` returns a `TextRange`; text formatting belongs to the range, not to `ParagraphInfo`.
 4. `getInfo()` and `getText()` may return `null`; generated code must handle missing objects when using stored ids.

@@ -158,6 +158,15 @@ export interface InsertParagraphSpec {
   pageBreakBefore?: boolean;
 }
 
+/** Paragraph payload used when a body has no existing anchor paragraph. */
+export interface BodyStartParagraphSpec {
+  text: string;
+  /** `'inherit'` has no source in an empty body and therefore uses document defaults. */
+  style?: 'inherit' | string;
+  /** `'inherit'` has no source in an empty body and therefore uses document defaults. */
+  runFormat?: 'inherit' | 'default';
+}
+
 // ─────────── Plan 选项(docs/03.1 §2)───────────
 
 export interface PlanOptions {
@@ -214,7 +223,7 @@ export type Op =
   // 无锚点在 <w:body> 起始插一个空段，返回新 paraId（ApplyResult.insertedBodyStartParaIds）。
   // 用途：body 完全无段落（极简/特殊文档，所有正文段被骨架删光）时，下游重建需要一个真实
   // 落点锚段。区别于 insertParagraphBefore/After——后者必须有 anchor 段；本 op 不需要。
-  | { type: 'insertParagraphAtBodyStart' }
+  | { type: 'insertParagraphAtBodyStart'; spec?: BodyStartParagraphSpec }
   | { type: 'deleteParagraph'; paraId: ParaId; onAnchorConflict: 'error' | 'drop' }
   | { type: 'createBookmark'; name: BookmarkName; range: Range }
   | { type: 'deleteBookmark'; name: BookmarkName }
@@ -511,7 +520,7 @@ export interface WordPlan {
    * 用途：body 完全无段落（极简/特殊文档，正文段被骨架删光）时，重建需要一个真实落点锚段。
    * 与 insertParagraphBefore/After 不同——后者必须有 anchor 段；本 op 不依赖任何已有段。
    */
-  insertParagraphAtBodyStart(): this;
+  insertParagraphAtBodyStart(spec?: BodyStartParagraphSpec): this;
 
   deleteParagraph(paraId: ParaId, opts?: { onAnchorConflict?: 'error' | 'drop' }): this;
 
@@ -902,9 +911,13 @@ export class WordPlanImpl implements WordPlan {
     return this;
   }
 
-  insertParagraphAtBodyStart(): this {
+  insertParagraphAtBodyStart(spec?: BodyStartParagraphSpec): this {
     this.ensureOpen('insertParagraphAtBodyStart');
-    this._ops.push({ type: 'insertParagraphAtBodyStart' });
+    this._ops.push(
+      spec === undefined
+        ? { type: 'insertParagraphAtBodyStart' }
+        : { type: 'insertParagraphAtBodyStart', spec },
+    );
     return this;
   }
 

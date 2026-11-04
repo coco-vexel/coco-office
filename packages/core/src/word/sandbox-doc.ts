@@ -11,7 +11,14 @@
  *   - `doc.paragraphs.list(opts) / get(id)`
  *   - `doc.bookmarks.list(opts) / get(name)`
  *   - `doc.comments.list() / get(id)`
+ *   - `doc.context.search(opts)`
  *   - `doc.revisions.list(opts)`
+ *   - `doc.styles.list(opts) / get(styleId)`
+ *   - `doc.tables.list(opts) / get(id)`
+ *   - `doc.drawings.list(opts) / get(id)`
+ *   - `doc.sections.list()`
+ *   - `doc.tocFields.list()`
+ *   - `doc.appendParagraph(text, opts)`
  *   - `doc.plan(opts).<op>().apply()`
  *
  * 不暴露:
@@ -21,18 +28,35 @@
  */
 import { kernelHandlers, type KernelMethod } from './kernel-handlers.js';
 import type { Kernel, KernelProgress } from './kernel.js';
-import { WordPlanImpl, type ApplyPlanParams, type PlanOptions, type WordPlan } from './plan.js';
+import {
+  WordPlanImpl,
+  type ApplyPlanParams,
+  type ApplyResult,
+  type PlanOptions,
+  type WordPlan,
+} from './plan.js';
 import {
   createBookmarkApi,
   createCommentApi,
+  createContextApi,
+  createDrawingsApi,
   createParagraphApi,
   createRevisionApi,
+  createSectionsApi,
+  createStylesApi,
   createTablesApi,
+  createTocFieldsApi,
   type BookmarkApi,
   type CommentApi,
+  type ContextApi,
+  type DrawingsApi,
   type ParagraphApi,
+  type ParagraphInsertOptions,
   type RevisionApi,
+  type SectionsApi,
+  type StylesApi,
   type TablesApi,
+  type TocFieldsApi,
 } from './sub-apis.js';
 import type { Transport } from './transport.js';
 import { WordError } from './word-error.js';
@@ -42,8 +66,14 @@ export interface SandboxDoc {
   readonly paragraphs: ParagraphApi;
   readonly bookmarks: BookmarkApi;
   readonly comments: CommentApi;
+  readonly context: ContextApi;
   readonly revisions: RevisionApi;
+  readonly styles: StylesApi;
   readonly tables: TablesApi;
+  readonly drawings: DrawingsApi;
+  readonly sections: SectionsApi;
+  readonly tocFields: TocFieldsApi;
+  appendParagraph(text: string, opts?: ParagraphInsertOptions): Promise<ApplyResult>;
   plan(opts?: PlanOptions): WordPlan;
 }
 
@@ -103,20 +133,45 @@ export function createSandboxDoc(kernel: Kernel): SandboxDoc {
   }
   const transport = createSandboxTransport(kernel);
   const noop = () => {};
+  const paragraphs = createParagraphApi(transport, noop);
+  const createPlan = (opts?: PlanOptions): WordPlan => {
+    const resolved: PlanOptions = {
+      trackChanges: opts?.trackChanges ?? false,
+    };
+    if (opts?.author !== undefined) resolved.author = opts.author;
+    if (opts?.date !== undefined) resolved.date = opts.date;
+    return new WordPlanImpl({ docId, transport, options: resolved });
+  };
   return {
     docId,
-    paragraphs: createParagraphApi(transport, noop),
+    paragraphs,
     bookmarks: createBookmarkApi(transport, noop),
     comments: createCommentApi(transport, noop),
+    context: createContextApi(transport, noop),
     revisions: createRevisionApi(transport, noop),
+    styles: createStylesApi(transport, noop),
     tables: createTablesApi(transport, noop),
+    drawings: createDrawingsApi(transport, noop),
+    sections: createSectionsApi(transport, noop),
+    tocFields: createTocFieldsApi(transport, noop),
+    async appendParagraph(text: string, opts: ParagraphInsertOptions = {}): Promise<ApplyResult> {
+      const { paragraphs: bodyParagraphs } = await paragraphs.list({
+        scope: 'body',
+        pagination: { mode: 'all' },
+      });
+      const last = bodyParagraphs[bodyParagraphs.length - 1];
+      if (last) return last.insertAfter(text, opts);
+
+      const spec: { text: string; style?: 'inherit' | string; runFormat?: 'inherit' | 'default' } =
+        {
+          text,
+        };
+      if (opts.style !== undefined) spec.style = opts.style;
+      if (opts.runFormat !== undefined) spec.runFormat = opts.runFormat;
+      return createPlan(opts).insertParagraphAtBodyStart(spec).apply();
+    },
     plan(opts?: PlanOptions): WordPlan {
-      const resolved: PlanOptions = {
-        trackChanges: opts?.trackChanges ?? false,
-      };
-      if (opts?.author !== undefined) resolved.author = opts.author;
-      if (opts?.date !== undefined) resolved.date = opts.date;
-      return new WordPlanImpl({ docId, transport, options: resolved });
+      return createPlan(opts);
     },
   };
 }

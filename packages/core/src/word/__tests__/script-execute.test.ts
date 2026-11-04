@@ -4,7 +4,7 @@
  * 覆盖:
  * - 基本执行:return 值穿透
  * - 顶层 await
- * - 访问 doc 的 namespace 形态 API:doc.paragraphs.list / doc.plan()(#159)
+ * - 访问 doc 的 namespace 形态 API:doc.paragraphs.list / doc.styles.list / doc.plan()(#159)
  * - args 传参
  * - 脚本抛错 → 透出 Error
  * - 语法错误 → 抛 'script syntax error: ...'
@@ -13,6 +13,7 @@
  * - 通过 InlineTransport / WordDocument.executeCode end-to-end
  */
 import { describe, expect, test } from 'vitest';
+import { WORD_CODEPLAN_API_MANIFEST } from '../codeplan-api-manifest.js';
 import { W14_NS, W_NS } from '../namespaces.js';
 import { WordDocument } from '../word-document.js';
 
@@ -29,10 +30,25 @@ const FLAT_OPC = `<?xml version="1.0" standalone="yes"?>
       </w:document>
     </pkg:xmlData>
   </pkg:part>
+  <pkg:part pkg:name="/word/styles.xml" pkg:contentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml">
+    <pkg:xmlData>
+      <w:styles xmlns:w="${W_NS}">
+        <w:style w:type="paragraph" w:styleId="Heading1">
+          <w:name w:val="heading 1"/>
+          <w:pPr><w:outlineLvl w:val="0"/></w:pPr>
+        </w:style>
+        <w:style w:type="character" w:styleId="Strong">
+          <w:name w:val="Strong"/>
+        </w:style>
+      </w:styles>
+    </pkg:xmlData>
+  </pkg:part>
 </pkg:package>`;
 
-async function makeDoc() {
-  return WordDocument.fromFlatOpc(FLAT_OPC, { docId: 'd', mode: 'inline' });
+const EMPTY_FLAT_OPC = FLAT_OPC.replace(/<w:body>[\s\S]*?<\/w:body>/, '<w:body/>');
+
+async function makeDoc(flatOpc = FLAT_OPC) {
+  return WordDocument.fromFlatOpc(flatOpc, { docId: 'd', mode: 'inline' });
 }
 
 describe('WordDocument.executeCode (inline)', () => {
@@ -60,6 +76,90 @@ describe('WordDocument.executeCode (inline)', () => {
       `const list = await doc.paragraphs.list(); return Promise.all(list.paragraphs.map(p => p.getText()))`,
     );
     expect(result).toEqual(['hello', 'world']);
+  });
+
+  test('sandbox doc: styles.list/get (CodePlan manifest 形态)', async () => {
+    const doc = await makeDoc();
+    const result = await doc.executeCode(
+      `const styles = await doc.styles.list({ type: 'paragraph' });
+       const heading = await doc.styles.get('Heading1');
+       return { styles, heading };`,
+    );
+    expect(result).toEqual({
+      styles: [
+        {
+          styleId: 'Heading1',
+          name: 'heading 1',
+          type: 'paragraph',
+          outlineLevel: 0,
+        },
+      ],
+      heading: {
+        styleId: 'Heading1',
+        name: 'heading 1',
+        type: 'paragraph',
+        outlineLevel: 0,
+      },
+    });
+  });
+
+  test('sandbox doc: exposes every enabled doc.* CodePlan API', async () => {
+    const doc = await makeDoc();
+    const paths = WORD_CODEPLAN_API_MANIFEST.filter(
+      (entry) => entry.codeplan && entry.path.startsWith('doc.'),
+    ).map((entry) => entry.path);
+    const missing = await doc.executeCode(
+      `const missing = [];
+       for (const path of args.paths) {
+         let value = doc;
+         for (const part of path.split('.').slice(1)) value = value?.[part];
+         if (typeof value !== 'function') missing.push(path);
+       }
+       return missing;`,
+      { paths },
+    );
+    expect(missing).toEqual([]);
+  });
+
+  test('sandbox doc: remaining manifest namespaces execute end-to-end', async () => {
+    const doc = await makeDoc();
+    const result = await doc.executeCode(
+      `const context = await doc.context.search({ query: 'hello' });
+       const drawings = await doc.drawings.list();
+       const sections = await doc.sections.list();
+       const tocFields = await doc.tocFields.list();
+       await doc.appendParagraph('appended');
+       const paragraphs = await doc.paragraphs.list({ pagination: { mode: 'all' } });
+       return {
+         foundHello: context.matches.some(match => match.text.includes('hello')),
+         drawingsIsArray: Array.isArray(drawings),
+         sectionsIsArray: Array.isArray(sections),
+         tocFieldsIsArray: Array.isArray(tocFields),
+         texts: await Promise.all(paragraphs.paragraphs.map(paragraph => paragraph.getText())),
+       };`,
+    );
+    expect(result).toEqual({
+      foundHello: true,
+      drawingsIsArray: true,
+      sectionsIsArray: true,
+      tocFieldsIsArray: true,
+      texts: ['hello', 'world', 'appended'],
+    });
+  });
+
+  test('sandbox doc: appendParagraph preserves style in an empty body', async () => {
+    const doc = await makeDoc(EMPTY_FLAT_OPC);
+    const result = await doc.executeCode(
+      `await doc.appendParagraph('empty-body heading', { style: 'Heading1' });
+       const { paragraphs } = await doc.paragraphs.list({ pagination: { mode: 'all' } });
+       const info = await paragraphs[0]?.getInfo();
+       return { count: paragraphs.length, text: await paragraphs[0]?.getText(), styleId: info?.styleId };`,
+    );
+    expect(result).toEqual({
+      count: 1,
+      text: 'empty-body heading',
+      styleId: 'Heading1',
+    });
   });
 
   test('#159 sandbox doc: docId 字段', async () => {

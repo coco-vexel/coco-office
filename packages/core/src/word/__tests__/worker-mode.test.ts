@@ -15,6 +15,7 @@ import { execSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
+import { WORD_CODEPLAN_API_MANIFEST } from '../codeplan-api-manifest.js';
 import { WordDocument } from '../word-document.js';
 import { WordError } from '../word-error.js';
 import { W14_NS, W_NS } from '../namespaces.js';
@@ -28,6 +29,7 @@ const CT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 </Types>`;
 
 const MAIN_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -42,11 +44,20 @@ const DOC_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   </w:body>
 </w:document>`;
 
+const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="${W_NS}">
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:pPr><w:outlineLvl w:val="0"/></w:pPr>
+  </w:style>
+</w:styles>`;
+
 async function makeFixtureZip(): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file('[Content_Types].xml', CT_XML);
   zip.file('_rels/.rels', MAIN_RELS);
   zip.file('word/document.xml', DOC_XML);
+  zip.file('word/styles.xml', STYLES_XML);
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -127,6 +138,50 @@ describe('WordDocument worker mode — 正常路径', () => {
        return list.paragraphs.length;`,
     );
     expect(r2).toBe(1); // DOC_XML 只有一段 'worker-load'
+
+    const r3 = await doc.executeCode(
+      `const styles = await doc.styles.list({ type: 'paragraph' });
+       return styles.map(style => ({ id: style.styleId, level: style.outlineLevel }));`,
+    );
+    expect(r3).toEqual([{ id: 'Heading1', level: 0 }]);
+
+    const enabledDocPaths = WORD_CODEPLAN_API_MANIFEST.filter(
+      (entry) => entry.codeplan && entry.path.startsWith('doc.'),
+    ).map((entry) => entry.path);
+    const missing = await doc.executeCode(
+      `const missing = [];
+       for (const path of args.paths) {
+         let value = doc;
+         for (const part of path.split('.').slice(1)) value = value?.[part];
+         if (typeof value !== 'function') missing.push(path);
+       }
+       return missing;`,
+      { paths: enabledDocPaths },
+    );
+    expect(missing).toEqual([]);
+
+    const r4 = await doc.executeCode(
+      `const context = await doc.context.search({ query: 'worker-load' });
+       const drawings = await doc.drawings.list();
+       const sections = await doc.sections.list();
+       const tocFields = await doc.tocFields.list();
+       await doc.appendParagraph('worker-appended');
+       const paragraphs = await doc.paragraphs.list({ pagination: { mode: 'all' } });
+       return {
+         matches: context.matches.length,
+         drawingCount: drawings.length,
+         sectionCount: sections.length,
+         tocCount: tocFields.length,
+         texts: await Promise.all(paragraphs.paragraphs.map(paragraph => paragraph.getText())),
+       };`,
+    );
+    expect(r4).toEqual({
+      matches: 1,
+      drawingCount: 0,
+      sectionCount: 0,
+      tocCount: 0,
+      texts: ['worker-load', 'worker-appended'],
+    });
 
     // 错误透传
     await expect(doc.executeCode('throw new Error("boom")')).rejects.toThrow('boom');
