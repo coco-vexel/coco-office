@@ -90,7 +90,10 @@ export async function createNodeExcelWorkerPort(bundleUrl: string | URL): Promis
   const worker = new Worker(bundleUrl);
   return {
     postMessage(data, transferList) {
-      worker.postMessage(data, transferList as readonly import('node:worker_threads').TransferListItem[] | undefined);
+      worker.postMessage(
+        data,
+        transferList as readonly import('node:worker_threads').Transferable[] | undefined,
+      );
     },
     onMessage(listener) {
       worker.on('message', listener);
