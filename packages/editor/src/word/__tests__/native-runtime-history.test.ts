@@ -370,6 +370,12 @@ describe('native runtime history integration', () => {
       anchor: { rowIndex: 0, columnIndex: 0 },
       focus: { rowIndex: 1, columnIndex: 1 },
     });
+    expect(editor.canDispatch({ kind: 'set-paragraph-alignment', alignment: 'center' })).toBe(true);
+    expect(editor.dispatch({ kind: 'set-paragraph-alignment', alignment: 'center' })).toBe(true);
+    expect(insertedTable?.kind === 'table'
+      ? insertedTable.rows.every((row) => row.cells.every((cell) =>
+        cell.paragraphs.every((paragraph) => paragraph.format?.alignment === 'center')))
+      : false).toBe(true);
     expect(editor.dispatch({ kind: 'set-table-cell-background', color: '#FFF2CC' })).toBe(true);
     expect(editor.dispatch({ kind: 'set-table-cell-borders', color: '#4472C4' })).toBe(true);
     expect(editor.dispatch({ kind: 'clear-table-cells' })).toBe(true);
@@ -385,11 +391,11 @@ describe('native runtime history integration', () => {
     expect(editor.dispatch({ kind: 'delete-table' })).toBe(true);
     expect(editor.getDocument().blocks.some((block) => block.kind === 'table')).toBe(false);
 
-    for (let index = 0; index < 11; index += 1) expect(editor.undo(), `table undo ${index + 1}`).toBe(true);
+    for (let index = 0; index < 12; index += 1) expect(editor.undo(), `table undo ${index + 1}`).toBe(true);
     expect(editor.getDocument()).toEqual(initial);
     expect(editor.canUndo()).toBe(false);
 
-    for (let index = 0; index < 11; index += 1) expect(editor.redo(), `table redo step ${index + 1}`).toBe(true);
+    for (let index = 0; index < 12; index += 1) expect(editor.redo(), `table redo step ${index + 1}`).toBe(true);
     expect(editor.getDocument().blocks.some((block) => block.kind === 'table')).toBe(false);
     expect(editor.canRedo()).toBe(false);
   });

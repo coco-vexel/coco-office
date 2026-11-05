@@ -380,7 +380,12 @@ function effectiveRunFormat(
 
 function selectedParagraphs(doc: NativeWordDocument, selection: WordEditorSelection | null): NativeWordParagraphNode[] {
   if (!selection) return [];
-  if (selection.kind === 'table-cell-range') return [];
+  if (selection.kind === 'table-cell-range') {
+    const table = findNativeTableLocation(doc, selection.tableId)?.table;
+    return table
+      ? nativeTableCellsInRange(table, selection).flatMap(({ cell }) => cell.paragraphs)
+      : [];
+  }
   if (selection.kind === 'caret' || selection.kind === 'object') {
     const paragraph = findNativeParagraph(doc, selection.paraId);
     return paragraph ? [paragraph] : [];

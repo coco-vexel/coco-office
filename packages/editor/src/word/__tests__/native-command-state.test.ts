@@ -283,14 +283,23 @@ describe('native command state', () => {
       anchor: { rowIndex: 1, columnIndex: 1 },
       focus: { rowIndex: 0, columnIndex: 0 },
     };
+    const table = doc.blocks[doc.blocks.length - 1];
+    if (table?.kind !== 'table') throw new Error('Expected table range fixture');
+    table.rows[0]!.cells[1]!.paragraphs[0]!.format = { alignment: 'center' };
 
-    expect(getNativeWordCommandState(doc, selection).table).toMatchObject({
+    const state = getNativeWordCommandState(doc, selection);
+    expect(state.table).toMatchObject({
       tableId: 'table-range',
       rowIndex: 1,
       columnIndex: 1,
       backgroundColor: 'mixed',
       range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1, cellCount: 4 },
     });
+    expect(state.paragraphAlignment).toBe('mixed');
+    expect(canDispatchNativeWordCommand(doc, selection, {
+      kind: 'set-paragraph-alignment',
+      alignment: 'center',
+    })).toBe(true);
     expect(canDispatchNativeWordCommand(doc, selection, { kind: 'clear-table-cells' })).toBe(true);
     expect(canDispatchNativeWordCommand(doc, selection, { kind: 'set-table-cell-borders', color: '#000000' })).toBe(true);
   });

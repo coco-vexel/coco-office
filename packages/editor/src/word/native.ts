@@ -2209,6 +2209,12 @@ export function renderNativeWordEditor(
   const selectedParagraphIds = (current: WordEditorSelection | null): string[] => {
     if (!current) return [];
     if (current.kind === 'caret' || current.kind === 'object') return [current.paraId];
+    if (current.kind === 'table-cell-range') {
+      const table = findNativeTableLocation(doc, current.tableId)?.table;
+      return table
+        ? nativeTableCellsInRange(table, current).flatMap(({ cell }) => cell.paragraphs.map((paragraph) => paragraph.paraId))
+        : [];
+    }
     return selectedTextRanges(current).map((range) => range.paraId);
   };
 
@@ -2579,7 +2585,6 @@ export function renderNativeWordEditor(
     formattingChanges: NativeWordChange[],
     reflow = false,
   ): boolean => {
-    if (current.kind === 'table-cell-range') return false;
     if (formattingChanges.length === 0) return false;
     if (beforeParagraphs.length === 0) return false;
     const afterParagraphs = beforeParagraphs
@@ -2589,6 +2594,14 @@ export function renderNativeWordEditor(
     const range =
       current.kind === 'text-range'
         ? orderedSelectionRange(doc, current)
+        : current.kind === 'table-cell-range'
+        ? {
+            anchor: { paraId: beforeParagraphs[0]!.paraId, offset: 0 },
+            focus: {
+              paraId: beforeParagraphs[beforeParagraphs.length - 1]!.paraId,
+              offset: nativeParagraphText(beforeParagraphs[beforeParagraphs.length - 1]!).length,
+            },
+          }
         : { anchor: { paraId: current.paraId, offset: current.offset }, focus: { paraId: current.paraId, offset: current.offset } };
     const transaction: BrowserTextTransaction = {
       source: 'local',
@@ -2612,9 +2625,11 @@ export function renderNativeWordEditor(
     else if (current.kind === 'object') {
       selectedImage = { paraId: current.paraId, drawingId: current.objectId };
       showImageResizeHandle();
-    } else restoreNativeCursor(host, { paraId: current.paraId, offset: current.offset });
+    } else if (current.kind === 'caret') restoreNativeCursor(host, { paraId: current.paraId, offset: current.offset });
     if (reflow) {
-      const cursor = current.kind === 'text-range' ? undefined : { paraId: current.paraId, offset: current.offset };
+      const cursor = current.kind === 'caret' || current.kind === 'object'
+        ? { paraId: current.paraId, offset: current.offset }
+        : undefined;
       reflowFromParagraph(beforeParagraphs[0]!.paraId, cursor, current);
     }
     if (current.kind === 'object' && selectedImage) showImageResizeHandle();
