@@ -6,6 +6,7 @@ import { collectContentOnlyCellPatches, patchWorkbookCellsInPackage } from './xl
 import { ExcelNamedItemCollection } from './names.js';
 import { ExcelWorksheetCollection } from './worksheet.js';
 import { ExcelMutationLog, type ExcelWorkbookMutation } from './mutations.js';
+import { importExcelCellStyles, type ExcelCellStyleSnapshot } from './cell-style.js';
 
 export interface ExcelLoadOptions {
   workbookId?: string;
@@ -58,6 +59,13 @@ export class ExcelWorkbookCore {
 
   styles(): ExcelStylesModel {
     return cloneStyles(this.model.styles);
+  }
+
+  importCellStyles(snapshots: readonly ExcelCellStyleSnapshot[]): number[] {
+    const count = this.model.styles.cellFormats.length;
+    const ids = importExcelCellStyles(this.model.styles, snapshots);
+    if (count !== this.model.styles.cellFormats.length) this.mutationLog.record({ kind: 'unsafe', scope: 'workbook', reason: 'Imported portable cell styles' });
+    return ids;
   }
 
   getMutations(): ExcelWorkbookMutation[] {

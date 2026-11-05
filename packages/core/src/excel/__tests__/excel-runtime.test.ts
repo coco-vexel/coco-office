@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
-import { ExcelWorkbook, ExcelWorkbookCore, type ExcelWorkbookModel } from '../index.js';
+import { captureExcelCellStyle, ExcelWorkbook, ExcelWorkbookCore, type ExcelWorkbookModel } from '../index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '../../../../..');
@@ -59,6 +59,28 @@ afterAll(() => {
 });
 
 describe('ExcelWorkbook async runtime facade', () => {
+  test.each(['inline', 'worker'] as const)('%s imports portable styles through the public facade and exports them', async (mode) => {
+    const workbook = await ExcelWorkbook.fromModel(MODEL, { mode });
+    try {
+      const snapshot = {
+        font: { name: 'KaiTi', size: 26, bold: true },
+        fill: { patternType: 'solid', foregroundColor: { rgb: '#FFFFAA' } },
+        border: { right: { style: 'dashed', color: { rgb: '#228866' } } },
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, numberFormatCode: '0.00" 元"',
+      };
+      const [id] = await workbook.importCellStyles([snapshot]);
+      const range = workbook.worksheets.getItem('Sheet1').getRange('C3');
+      await range.setValues([[12.5]]); await range.setStyleId(id);
+      expect(await workbook.importCellStyles([snapshot])).toEqual([id]);
+      const reopened = await ExcelWorkbook.fromZip(await workbook.toZip(), { mode: 'inline' });
+      try {
+        const model = await reopened.toModel();
+        const cell = model.sheets[0]!.cells.find((cell) => cell.address === 'C3')!;
+        expect(captureExcelCellStyle(model.styles, cell.styleId)).toEqual(snapshot);
+      } finally { await reopened.dispose(); }
+    } finally { await workbook.dispose(); }
+  });
+
   test('inline mode supports async worksheet/range/cell APIs', async () => {
     const workbook = await ExcelWorkbook.fromModel(MODEL, {
       workbookId: 'inline-book',

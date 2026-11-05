@@ -1,4 +1,5 @@
 import { ExcelWorkbookCore, type ExcelLoadOptions } from './excel-workbook.js';
+import type { ExcelCellStyleSnapshot } from './cell-style.js';
 import {
   aggregateExcelTable,
   type ExcelAggregateTableOptions,
@@ -292,6 +293,10 @@ export class ExcelWorkbook {
   async aggregateTable(options: ExcelAggregateTableOptions): Promise<ExcelAggregateTableResult> {
     this.assertNotDisposed();
     return aggregateExcelTable(await this.toModel(), options);
+  }
+
+  async importCellStyles(snapshots: readonly ExcelCellStyleSnapshot[]): Promise<number[]> {
+    return this.executeCode<number[]>('return workbook.importCellStyles(args.snapshots);', { snapshots });
   }
 
   async toZip(): Promise<Uint8Array> {

@@ -55,6 +55,7 @@ export type {
   ExcelScriptApiReceiverMap,
 } from './script-api-contract.js';
 export { readWorkbookModel } from './xlsx-reader.js';
+export { captureExcelCellStyle, equalExcelCellStyles, importExcelCellStyles, type ExcelCellStyleSnapshot } from './cell-style.js';
 export {
   columnIndexToName,
   columnNameToIndex,
