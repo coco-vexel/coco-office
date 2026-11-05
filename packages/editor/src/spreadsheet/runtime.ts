@@ -1,5 +1,7 @@
 import {
   ExcelWorkbook,
+  captureExcelCellStyle,
+  equalExcelCellStyles,
   SpreadsheetFormulaEngine,
   rewriteFormulaForRowSort,
   diffExcelWorkbookModels,
@@ -30,7 +32,8 @@ import {
   type SpreadsheetSortDirection,
 } from './filter.js';
 import type { SpreadsheetRange, SpreadsheetSheetRenderModel } from './types.js';
-import type { SpreadsheetClipboardMerge } from './clipboard.js';
+import { formulasForPaste, type SpreadsheetClipboardMerge, type SpreadsheetClipboardPayload } from './clipboard.js';
+import { rewriteMovedCellFormula } from './clipboard-move.js';
 import { EditorReadOnlyError } from '../read-only.js';
 
 export interface SpreadsheetEditorRuntimeOptions {
@@ -93,6 +96,7 @@ export interface SpreadsheetPasteOptions {
   mode?: SpreadsheetPasteMode;
   merges?: SpreadsheetClipboardMerge[];
   styleIds?: (number | undefined)[][];
+  formulas?: (string | null)[][];
 }
 
 export class SpreadsheetEditorRuntime {
@@ -116,7 +120,9 @@ export class SpreadsheetEditorRuntime {
 
   static async fromWorkbook(workbook: ExcelWorkbook, options: SpreadsheetEditorRuntimeOptions = {}): Promise<SpreadsheetEditorRuntime> {
     const model = await workbook.toModel();
-    const firstSheet = model.sheets[0];
+    const firstSheet = model.sheets.find((sheet) =>
+      sheet.sheetViews.some((view) => view.tabSelected === true),
+    ) ?? model.sheets[0];
     if (!firstSheet) throw new Error('SpreadsheetEditorRuntime: workbook has no sheets');
     const formulaEngine = new SpreadsheetFormulaEngine(firstSheet, { sheets: model.sheets });
     const formulaResults = formulaEngine.calculate();
@@ -238,6 +244,24 @@ export class SpreadsheetEditorRuntime {
   async setActiveSheet(sheetName: string): Promise<void> {
     const sheet = this.state.model.sheets.find((item) => item.name === sheetName);
     if (!sheet) throw new Error(`SpreadsheetEditorRuntime: sheet not found: ${sheetName}`);
+    if (!this.readOnlyValue) {
+      for (const worksheet of await this.state.workbook.worksheets.items()) {
+        const name = await worksheet.name();
+        const views = await worksheet.sheetViews();
+        const selected = name === sheetName;
+        await worksheet.setSheetViews(
+          views.length > 0
+            ? views.map((view) => ({ ...view, tabSelected: selected }))
+            : [{ workbookViewId: 0, tabSelected: selected, selections: [] }],
+        );
+      }
+      for (const item of this.state.model.sheets) {
+        const selected = item.name === sheetName;
+        item.sheetViews = item.sheetViews.length > 0
+          ? item.sheetViews.map((view) => ({ ...view, tabSelected: selected }))
+          : [{ workbookViewId: 0, tabSelected: selected, selections: [] }];
+      }
+    }
     const formulaEngine = new SpreadsheetFormulaEngine(sheet, { sheets: this.state.model.sheets });
     const formulaResults = formulaEngine.calculate();
     this.state.activeSheetName = sheet.name;
@@ -487,6 +511,7 @@ export class SpreadsheetEditorRuntime {
   ): Promise<void> {
     const rowCount = values.length;
     const columnCount = values.reduce((max, row) => Math.max(max, row.length), 0);
+    if (rowCount === 0 || columnCount === 0) return;
     const normalized = values.map((row) => {
       const next = row.slice();
       while (next.length < columnCount) next.push(null);
@@ -533,6 +558,7 @@ export class SpreadsheetEditorRuntime {
     const mode = options.mode ?? 'all';
     const rowCount = values.length;
     const columnCount = values.reduce((max, row) => Math.max(max, row.length), 0);
+    if (rowCount === 0 || columnCount === 0) return;
     const normalized = values.map((row) => {
       const next = row.slice();
       while (next.length < columnCount) next.push(null);
@@ -549,14 +575,29 @@ export class SpreadsheetEditorRuntime {
     const existingMerges = [...this.state.activeSheet.mergeMasterByAddress.values()]
       .filter((merge) => rangesIntersect(targetRange, merge.range))
       .map((merge) => merge.address);
+    for (const address of existingMerges) {
+      const merge = parseRangeAddress(address);
+      if (merge.startRow < startRow || merge.startColumn < startColumn ||
+        merge.startRow + merge.rowCount > startRow + effectiveRowCount || merge.startColumn + merge.columnCount > startColumn + effectiveColumnCount) {
+        throw new Error('粘贴区域不能只覆盖合并单元格的一部分。');
+      }
+    }
+    const formulas = options.formulas ?? normalized.map((row) => row.map((value) => typeof value === 'string' && value.startsWith('=') ? value.slice(1) : null));
+    if (mode === 'all' && formulas.some((row) => row.some((formula) => formula !== null && formula.trim() === ''))) throw new Error('粘贴数据包含空公式。');
     await this.runUserMutation({ label: pasteHistoryLabel(mode) }, async (tx) => {
       if (mode !== 'formats') {
-        for (const address of existingMerges) await tx.unmergeRange(this.state.activeSheetName, address);
+        if (mode === 'all') for (const address of existingMerges) await tx.unmergeRange(this.state.activeSheetName, address);
         await tx.setRangeValues(
           this.state.activeSheetName,
           formatRangeAddress(startRow, startColumn, effectiveRowCount, effectiveColumnCount),
           normalized,
         );
+        if (mode === 'all') {
+          for (let r = 0; r < formulas.length; r++) for (let c = 0; c < formulas[r]!.length; c++) {
+            const formula = formulas[r]![c];
+            if (formula !== null && formula !== undefined) await tx.setCellFormula(this.state.activeSheetName, formatCellAddress(startRow + r, startColumn + c), formula);
+          }
+        }
       }
       if (mode !== 'values') {
         await applySpreadsheetPasteStyles(
@@ -572,6 +613,125 @@ export class SpreadsheetEditorRuntime {
     });
   }
 
+  async pasteClipboard(payload: SpreadsheetClipboardPayload, target: SpreadsheetRange, options: { cut?: boolean; valuesOnly?: boolean } = {}): Promise<SpreadsheetRange> {
+    const height = payload.values.length; const width = payload.values.reduce((max, row) => Math.max(max, row.length), 0);
+    if (!height || !width) return target;
+    this.assertWritable();
+    if (!options.valuesOnly && payload.formulas.some((row) => row.some((formula) => formula !== null && formula.trim() === ''))) throw new Error('粘贴数据包含空公式。');
+    const destinationMerge = this.state.activeSheet.mergeMasterByAddress.get(formatCellAddress(target.startRow, target.startColumn));
+    if (!options.cut && height === 1 && width === 1 && destinationMerge && target.startRow === target.endRow && target.startColumn === target.endColumn) target = { ...destinationMerge.range };
+    if (!options.cut && height === 1 && width === 1 && destinationMerge &&
+      destinationMerge.range.endRow === target.endRow && destinationMerge.range.endColumn === target.endColumn) {
+      const address = formatRangeAddress(target.startRow, target.startColumn, target.endRow - target.startRow + 1, target.endColumn - target.startColumn + 1);
+      const imported = options.valuesOnly ? [] : await this.resolveClipboardStyles(payload);
+      await this.runUserMutation({ label: 'Paste into merged cell' }, async (tx) => {
+        await tx.setRangeValues(this.state.activeSheetName, address, Array.from({ length: target.endRow - target.startRow + 1 }, () => Array<ExcelCellValue>(target.endColumn - target.startColumn + 1).fill(null)));
+        await tx.setCellValue(this.state.activeSheetName, formatCellAddress(target.startRow, target.startColumn), payload.values[0]![0]!);
+        const formula = formulasForPaste(payload, target.startRow, target.startColumn)[0]?.[0];
+        if (!options.valuesOnly && formula) await tx.setCellFormula(this.state.activeSheetName, formatCellAddress(target.startRow, target.startColumn), formula);
+        if (!options.valuesOnly && imported.length) await tx.setRangeStyleId(this.state.activeSheetName, address, imported[0]?.[0]);
+      });
+      return target;
+    }
+    const selectedHeight = target.endRow - target.startRow + 1; const selectedWidth = target.endColumn - target.startColumn + 1;
+    const rows = options.cut ? height : Math.max(height, selectedHeight);
+    const columns = options.cut ? width : Math.max(width, selectedWidth);
+    if (!options.cut && (rows % height || columns % width)) throw new Error('复制区域与粘贴区域的大小不匹配。');
+    const result = { ...target, endRow: target.startRow + rows - 1, endColumn: target.startColumn + columns - 1 };
+    const values = Array.from({ length: rows }, (_, r) => Array.from({ length: columns }, (_, c) => payload.values[r % height]?.[c % width] ?? null));
+    let styleIds = payload.styleIds.length ? Array.from({ length: rows }, (_, r) => Array.from({ length: columns }, (_, c) => payload.styleIds[r % height]?.[c % width])) : [];
+    const formulas = Array.from({ length: rows }, () => Array<string | null>(columns).fill(null));
+    const merges: SpreadsheetClipboardMerge[] = [];
+    for (let r = 0; r < rows; r += height) for (let c = 0; c < columns; c += width) {
+      const translated = formulasForPaste(payload, target.startRow + r, target.startColumn + c, options.cut);
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) formulas[r + y]![c + x] = translated[y]?.[x] ?? null;
+      merges.push(...payload.merges.map((merge) => ({ ...merge, startRowOffset: merge.startRowOffset + r, startColumnOffset: merge.startColumnOffset + c })));
+    }
+    if (!options.cut) {
+      formatRangeAddress(result.startRow, result.startColumn, rows, columns);
+      for (const merge of this.state.activeSheet.mergeMasterByAddress.values()) {
+        if (rangesIntersect(result, merge.range) && (merge.range.startRow < result.startRow || merge.range.startColumn < result.startColumn || merge.range.endRow > result.endRow || merge.range.endColumn > result.endColumn)) throw new Error('粘贴区域不能只覆盖合并单元格的一部分。');
+      }
+      if (!options.valuesOnly && payload.styleIds.length) {
+        const imported = await this.resolveClipboardStyles(payload);
+        styleIds = Array.from({ length: rows }, (_, r) => Array.from({ length: columns }, (_, c) => imported[r % height]?.[c % width]));
+      }
+      await this.pasteRange(target.startRow, target.startColumn, values, { mode: options.valuesOnly ? 'values' : 'all', formulas, styleIds, merges });
+      return result;
+    }
+    const sourceSheet = this.state.model.sheets.find((sheet) => sheet.name === payload.sourceSheet);
+    if (!sourceSheet) throw new Error('剪切来源工作表已不存在，请重新复制。');
+    const source = payload.sourceRange; const targetSheet = this.state.activeSheetName;
+    const inside = (row: number, column: number, range: SpreadsheetRange) => row >= range.startRow && row <= range.endRow && column >= range.startColumn && column <= range.endColumn;
+    formatRangeAddress(result.startRow, result.startColumn, rows, columns);
+    for (const merge of this.state.activeSheet.mergeMasterByAddress.values()) {
+      const moving = payload.sourceSheet === targetSheet && inside(merge.range.startRow, merge.range.startColumn, source) && inside(merge.range.endRow, merge.range.endColumn, source);
+      if (!moving && rangesIntersect(result, merge.range) && (!inside(merge.range.startRow, merge.range.startColumn, result) || !inside(merge.range.endRow, merge.range.endColumn, result))) throw new Error('粘贴区域不能只覆盖合并单元格的一部分。');
+    }
+    const sourceCells = new Map(sourceSheet.cells.map((cell) => [cell.address, cell]));
+    for (let r = 0; r < height; r++) for (let c = 0; c < width; c++) {
+      const cell = sourceCells.get(formatCellAddress(source.startRow + r, source.startColumn + c));
+      if (cell?.styleId !== payload.styleIds[r]?.[c]) throw new Error('剪切来源格式已变化，请重新剪切。');
+      if (payload.merges.some((merge) => r >= merge.startRowOffset && r < merge.startRowOffset + merge.rowCount && c >= merge.startColumnOffset && c < merge.startColumnOffset + merge.columnCount && (r !== merge.startRowOffset || c !== merge.startColumnOffset))) continue;
+      if ((cell?.formula ?? null) !== (payload.formulas[r]?.[c] ?? null) || (!cell?.formula && (cell?.value ?? null) !== payload.values[r]![c])) throw new Error('剪切来源内容已变化，请重新剪切。');
+    }
+    if (payload.sourceSheet === targetSheet && source.startRow === target.startRow && source.startColumn === target.startColumn) return result;
+    const updates: { sheet: string; address: string; formula: string }[] = [];
+    for (const sheet of this.state.model.sheets) for (const cell of sheet.cells) {
+      if (!cell.formula) continue;
+      const moving = sheet.name === payload.sourceSheet && inside(cell.row, cell.column, source);
+      if (!moving && sheet.name === targetSheet && inside(cell.row, cell.column, result)) continue;
+      const resultSheet = moving ? targetSheet : sheet.name;
+      const formula = rewriteMovedCellFormula(cell.formula, {
+        sourceSheet: payload.sourceSheet, targetSheet, source, formulaSheet: sheet.name, resultSheet,
+        rowOffset: target.startRow - source.startRow, columnOffset: target.startColumn - source.startColumn,
+      });
+      if (moving || formula !== cell.formula) updates.push({ sheet: resultSheet, address: moving
+        ? formatCellAddress(target.startRow + cell.row - source.startRow, target.startColumn + cell.column - source.startColumn) : cell.address, formula });
+    }
+    const namedUpdates = this.state.model.definedNames.flatMap((name, index) => {
+      const sheet = this.state.model.sheets[name.localSheetId ?? 0]?.name ?? payload.sourceSheet;
+      const text = rewriteMovedCellFormula(name.text, {
+        sourceSheet: payload.sourceSheet, targetSheet, source, formulaSheet: sheet, resultSheet: sheet,
+        rowOffset: target.startRow - source.startRow, columnOffset: target.startColumn - source.startColumn,
+      });
+      return text === name.text ? [] : [{ index, text }];
+    });
+    await this.runUserMutation({ label: 'Move cells' }, async (tx) => {
+      for (const merge of payload.merges) await tx.unmergeRange(payload.sourceSheet, formatRangeAddress(source.startRow + merge.startRowOffset, source.startColumn + merge.startColumnOffset, merge.rowCount, merge.columnCount));
+      await tx.clearRange(payload.sourceSheet, formatRangeAddress(source.startRow, source.startColumn, height, width));
+      // Resolve paste merges against the cleared source, including overlapping moves.
+      await this.refresh();
+      await this.pasteRange(target.startRow, target.startColumn, values, { formulas, styleIds, merges });
+      for (const update of updates) await tx.setCellFormula(update.sheet, update.address, update.formula);
+      if (namedUpdates.length) await tx.runSnapshot('Move named references', 'Cut updates defined-name references', async () => {
+        await this.state.workbook.executeCode<void>(`
+          const names = workbook.names.items();
+          for (const update of args.updates) names[update.index].setText(update.text);
+        `, { updates: namedUpdates });
+      });
+    });
+    return result;
+  }
+
+  private async resolveClipboardStyles(payload: SpreadsheetClipboardPayload): Promise<(number | undefined)[][]> {
+    if (!payload.styles) return payload.styleIds;
+    const styles = this.state.model.styles;
+    const keys = [...new Set(payload.styleIds.flat().map((id) => id === undefined ? 'default' : String(id)))];
+    const snapshots = keys.map((key) => {
+      const snapshot = payload.styles![key];
+      if (!snapshot) throw new Error('剪贴板缺少单元格格式定义，请重新复制。');
+      return snapshot;
+    });
+    const imported = await this.state.workbook.importCellStyles(snapshots);
+    const ids = new Map(keys.map((key, index) => [key, imported[index]!]));
+    return payload.styleIds.map((row) => row.map((id) => {
+      const key = id === undefined ? 'default' : String(id);
+      if ((id === undefined || styles.cellFormats[id]) && equalExcelCellStyles(payload.styles![key]!, captureExcelCellStyle(styles, id))) return id;
+      return ids.get(key)!;
+    }));
+  }
+
   async clearRange(
     startRow: number,
     startColumn: number,
@@ -579,9 +739,10 @@ export class SpreadsheetEditorRuntime {
     columnCount: number,
   ): Promise<void> {
     await this.runUserMutation({ label: 'Clear range' }, async (tx) => {
-      await tx.clearRange(
+      await tx.setRangeValues(
         this.state.activeSheetName,
         formatRangeAddress(startRow, startColumn, rowCount, columnCount),
+        Array.from({ length: rowCount }, () => Array<ExcelCellValue>(columnCount).fill(null)),
       );
     });
   }
@@ -592,9 +753,13 @@ export class SpreadsheetEditorRuntime {
     });
   }
 
-  async setColumnWidth(column: number, width: number): Promise<void> {
+  async setColumnWidth(column: number, width: number, maximumDigitWidth?: number): Promise<void> {
     await this.runUserMutation({ label: 'Set column width' }, async (tx) => {
-      await tx.setColumnWidth(this.state.activeSheetName, column, cssPixelsToExcelColumnWidth(width));
+      await tx.setColumnWidth(
+        this.state.activeSheetName,
+        column,
+        cssPixelsToExcelColumnWidth(width, maximumDigitWidth),
+      );
     });
   }
 

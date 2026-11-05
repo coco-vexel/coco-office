@@ -6,6 +6,217 @@ import { buildSpreadsheetSheetRenderModel } from '../render-model.js';
 import { resolveSpreadsheetRangeBorder } from '../style-resolver.js';
 
 describe('spreadsheet runtime', () => {
+  test('copies formulas with relative, absolute and mixed references, and tiles a selected destination', async () => {
+    const source = model();
+    source.sheets[0]!.cells = [
+      { address: 'A1', row: 1, column: 1, kind: 'number', value: 2 },
+      { address: 'A2', row: 2, column: 1, kind: 'number', value: 3 },
+      { address: 'B1', row: 1, column: 2, kind: 'formula', formula: 'A1+$A$1+$A1+A$1', value: null },
+    ];
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(await ExcelWorkbook.fromModel(source, { mode: 'inline' }));
+    try {
+      const payload = buildSpreadsheetClipboardPayload(runtime.activeSheet(), { startRow: 1, endRow: 1, startColumn: 2, endColumn: 2 });
+      await runtime.pasteClipboard(payload, { startRow: 2, endRow: 3, startColumn: 2, endColumn: 2 });
+      expect(runtime.activeSheet().cellsByAddress.get('B2')).toMatchObject({ formula: 'A2+$A$1+$A2+A$1', value: 10 });
+      expect(runtime.activeSheet().cellsByAddress.get('B3')?.formula).toBe('A3+$A$1+$A3+A$1');
+      expect(runtime.workbook().history().undoGroups()).toHaveLength(1);
+      await runtime.undo();
+      expect(runtime.activeSheet().cellsByAddress.has('B2')).toBe(false);
+      await runtime.redo();
+      expect(runtime.activeSheet().cellsByAddress.get('B2')?.value).toBe(10);
+    } finally { await runtime.dispose(); }
+  });
+
+  test('moves cut cells and dependent formulas as one undoable action', async () => {
+    const source = model();
+    source.sheets[0]!.cells = [
+      { address: 'A1', row: 1, column: 1, kind: 'number', value: 1, styleId: 0 },
+      { address: 'A2', row: 2, column: 1, kind: 'number', value: 2 },
+      { address: 'B1', row: 1, column: 2, kind: 'formula', formula: 'SUM($A$1:A2)', value: null },
+    ];
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(await ExcelWorkbook.fromModel(source, { mode: 'inline' }));
+    try {
+      const payload = buildSpreadsheetClipboardPayload(runtime.activeSheet(), { startRow: 1, endRow: 2, startColumn: 1, endColumn: 1 });
+      await runtime.pasteClipboard(payload, { startRow: 1, endRow: 1, startColumn: 3, endColumn: 3 }, { cut: true });
+      expect(runtime.activeSheet().cellsByAddress.has('A1')).toBe(false);
+      expect(runtime.activeSheet().cellsByAddress.get('C1')).toMatchObject({ value: 1, styleId: 0 });
+      expect(runtime.activeSheet().cellsByAddress.get('B1')).toMatchObject({ formula: 'SUM($C$1:C2)', value: 3 });
+      expect(runtime.workbook().history().undoGroups()).toHaveLength(1);
+      await runtime.undo();
+      expect(runtime.activeSheet().cellsByAddress.get('A1')?.value).toBe(1);
+      expect(runtime.activeSheet().cellsByAddress.get('B1')?.formula).toBe('SUM($A$1:A2)');
+      expect(runtime.activeSheet().cellsByAddress.has('C1')).toBe(false);
+      await runtime.redo();
+      expect(runtime.activeSheet().cellsByAddress.get('B1')?.value).toBe(3);
+    } finally { await runtime.dispose(); }
+  });
+
+  test('moves a formula across sheets without rebasing references outside the moved range', async () => {
+    const source = model();
+    source.sheets[0]!.cells = [
+      { address: 'A1', row: 1, column: 1, kind: 'number', value: 4 },
+      { address: 'B1', row: 1, column: 2, kind: 'formula', formula: 'A1*2', value: null },
+      { address: 'C1', row: 1, column: 3, kind: 'formula', formula: 'B1+1', value: null },
+    ];
+    source.sheets.push({ ...structuredClone(source.sheets[0]!), id: '2', name: 'Other', cells: [] });
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(await ExcelWorkbook.fromModel(source, { mode: 'inline' }));
+    try {
+      const payload = buildSpreadsheetClipboardPayload(runtime.activeSheet(), { startRow: 1, endRow: 1, startColumn: 2, endColumn: 2 });
+      await runtime.setActiveSheet('Other');
+      await runtime.pasteClipboard(payload, { startRow: 3, endRow: 3, startColumn: 3, endColumn: 3 }, { cut: true });
+      expect(runtime.activeSheet().cellsByAddress.get('C3')).toMatchObject({ formula: "'Sheet1'!A1*2", value: 8 });
+      await runtime.setActiveSheet('Sheet1');
+      expect(runtime.activeSheet().cellsByAddress.get('C1')).toMatchObject({ formula: "'Other'!C3+1", value: 9 });
+      expect(runtime.activeSheet().cellsByAddress.has('B1')).toBe(false);
+      await runtime.undo();
+      expect(runtime.activeSheet().cellsByAddress.get('B1')?.value).toBe(8);
+    } finally { await runtime.dispose(); }
+  });
+
+  test('moves overlapping cut ranges without deleting destination data', async () => {
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(await ExcelWorkbook.fromModel(model(), { mode: 'inline' }));
+    try {
+      await runtime.setRangeValues(1, 1, [[1, 2, 3]]);
+      const payload = buildSpreadsheetClipboardPayload(runtime.activeSheet(), { startRow: 1, endRow: 1, startColumn: 1, endColumn: 3 });
+      await runtime.pasteClipboard(payload, { startRow: 1, endRow: 1, startColumn: 2, endColumn: 2 }, { cut: true });
+      expect(await runtime.workbook().worksheets.getItem('Sheet1').getRange('A1:D1').values()).toEqual([[null, 1, 2, 3]]);
+      await runtime.undo();
+      expect(await runtime.workbook().worksheets.getItem('Sheet1').getRange('A1:D1').values()).toEqual([[1, 2, 3, null]]);
+    } finally { await runtime.dispose(); }
+  });
+
+  test('rejects incompatible cut destinations before clearing the source', async () => {
+    const source = model();
+    source.sheets[0]!.mergedRanges = [{ address: 'C1:D2' }];
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(await ExcelWorkbook.fromModel(source, { mode: 'inline' }));
+    try {
+      await runtime.setCellValue('A1', 'keep');
+      const payload = buildSpreadsheetClipboardPayload(runtime.activeSheet(), { startRow: 1, endRow: 1, startColumn: 1, endColumn: 1 });
+      const before = structuredClone(runtime.model());
+      await expect(runtime.pasteClipboard(payload, { startRow: 1, endRow: 1, startColumn: 3, endColumn: 3 }, { cut: true })).rejects.toThrow(/合并单元格/);
+      expect(runtime.model()).toEqual(before);
+      expect(runtime.activeSheet().cellsByAddress.get('A1')?.value).toBe('keep');
+    } finally { await runtime.dispose(); }
+  });
+
+  test('shrinks a partially cut range edge and restores everything on undo', async () => {
+    const source = model();
+    source.sheets[0]!.cells = [
+      { address: 'A1', row: 1, column: 1, kind: 'number', value: 1 },
+      { address: 'B1', row: 1, column: 2, kind: 'formula', value: null, formula: 'SUM(A1:A10)' },
+    ];
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(await ExcelWorkbook.fromModel(source, { mode: 'inline' }));
+    try {
+      const payload = buildSpreadsheetClipboardPayload(runtime.activeSheet(), { startRow: 1, endRow: 1, startColumn: 1, endColumn: 1 });
+      await runtime.pasteClipboard(payload, { startRow: 1, endRow: 1, startColumn: 3, endColumn: 3 }, { cut: true });
+      expect(runtime.activeSheet().cellsByAddress.get('B1')).toMatchObject({ formula: 'SUM(A2:A10)', value: 0 });
+      expect(runtime.activeSheet().cellsByAddress.get('C1')?.value).toBe(1);
+      await runtime.undo();
+      expect(runtime.activeSheet().cellsByAddress.get('B1')?.value).toBe(1);
+      expect(runtime.activeSheet().cellsByAddress.get('A1')?.value).toBe(1);
+      await runtime.redo();
+      const reopened = await ExcelWorkbook.fromZip(await runtime.toZip(), { mode: 'inline' });
+      try { expect(await reopened.worksheets.getItem('Sheet1').getRange('B1').formulas()).toEqual([['SUM(A2:A10)']]); }
+      finally { await reopened.dispose(); }
+    } finally { await runtime.dispose(); }
+  });
+
+  test('cut invalidates overwritten references, shrinks a referenced edge, and restores names and formulas together', async () => {
+    const source = model();
+    source.definedNames = [{ name: 'Moved', text: 'Sheet1!$A$1' }];
+    source.sheets[0]!.cells = [
+      { address: 'A1', row: 1, column: 1, kind: 'number', value: 10 },
+      { address: 'C1', row: 1, column: 3, kind: 'number', value: 20 },
+      { address: 'D1', row: 1, column: 4, kind: 'number', value: 30 },
+      { address: 'E1', row: 1, column: 5, kind: 'formula', formula: 'A1+$C$1', value: null },
+      { address: 'E2', row: 2, column: 5, kind: 'formula', formula: 'SUM(C1:D1)', value: null },
+      { address: 'E3', row: 3, column: 5, kind: 'formula', formula: 'Moved*2', value: null },
+    ];
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(await ExcelWorkbook.fromModel(source, { mode: 'inline' }));
+    try {
+      const payload = buildSpreadsheetClipboardPayload(runtime.activeSheet(), { startRow: 1, endRow: 1, startColumn: 1, endColumn: 1 });
+      await runtime.pasteClipboard(payload, { startRow: 1, endRow: 1, startColumn: 3, endColumn: 3 }, { cut: true });
+      expect(runtime.activeSheet().cellsByAddress.get('E1')?.formula).toBe('C1+#REF!');
+      expect(runtime.activeSheet().cellsByAddress.get('E2')).toMatchObject({ formula: 'SUM(D1:D1)', value: 30 });
+      expect(runtime.activeSheet().cellsByAddress.get('E3')?.formula).toBe('Moved*2');
+      expect(runtime.model().definedNames[0]!.text).toBe("'Sheet1'!$C$1");
+      expect(runtime.workbook().history().undoGroups()).toHaveLength(1);
+      await runtime.undo();
+      expect(runtime.activeSheet().cellsByAddress.get('E1')).toMatchObject({ formula: 'A1+$C$1', value: 30 });
+      expect(runtime.model().definedNames[0]!.text).toBe('Sheet1!$A$1');
+      await runtime.redo();
+      expect(runtime.activeSheet().cellsByAddress.get('E3')?.formula).toBe('Moved*2');
+      const reopened = await ExcelWorkbook.fromZip(await runtime.toZip(), { mode: 'inline' });
+      try {
+        expect((await reopened.toModel()).definedNames[0]!.text).toBe("'Sheet1'!$C$1");
+        expect(await reopened.worksheets.getItem('Sheet1').getRange('E1').formulas()).toEqual([['C1+#REF!']]);
+      } finally { await reopened.dispose(); }
+    } finally { await runtime.dispose(); }
+  });
+
+  test('ignores empty bulk writes and pastes without unmerging, changing styles, or creating undo entries', async () => {
+    const source = model();
+    source.sheets[0]!.mergedRanges = [{ address: 'A1:B2' }];
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(await ExcelWorkbook.fromModel(source, { mode: 'inline' }));
+    try {
+      const before = structuredClone(runtime.model());
+      for (const values of [[], [[]]]) {
+        await runtime.setRangeValues(1, 1, values);
+        await runtime.pasteRange(1, 1, values);
+      }
+      expect(runtime.model()).toEqual(before);
+      expect(runtime.canUndo()).toBe(false);
+    } finally { await runtime.dispose(); }
+  });
+
+  test.each(['clear', 'paste', 'values', 'formula'] as const)('preserves formatting and undo when clearing content with %s', async (method) => {
+    const source = model();
+    const side = { style: 'thin', color: { rgb: '#2C7A69' } };
+    source.styles.borders.push({ top: side, bottom: side, left: side, right: side });
+    source.styles.fonts.push({ name: 'KaiTi', size: 26 });
+    source.styles.fills.push({ patternType: 'solid', foregroundColor: { rgb: '#FFFF00' } });
+    source.styles.cellFormats.push({ fontId: 1, fillId: 1, borderId: 1, alignment: { horizontal: 'center' } });
+    source.sheets[0]!.cells = [
+      { address: 'A1', row: 1, column: 1, kind: 'string', value: '田', styleId: 1 },
+      { address: 'B1', row: 1, column: 2, kind: 'formula', value: 2, formula: '1+1', styleId: 1 },
+      { address: 'A2', row: 2, column: 1, kind: 'blank', value: null, styleId: 1 },
+      { address: 'B2', row: 2, column: 2, kind: 'number', value: 0, styleId: 0 },
+    ];
+    const workbook = await ExcelWorkbook.fromModel(source, { mode: 'inline' });
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(workbook);
+    const original = await workbook.toModel();
+    const sheet = workbook.worksheets.getItem('Sheet1');
+    const range = sheet.getRange('A1:B2');
+    try {
+      if (method === 'clear') await runtime.clearRange(1, 1, 2, 2);
+      else if (method === 'paste') await runtime.pasteRange(1, 1, [[null, null], [null, null]], { mode: 'values' });
+      else if (method === 'values') await runtime.setRangeValues(1, 1, [[null, null], [null, null]]);
+      else {
+        await runtime.runUserTransaction({ label: 'Clear formulas' }, async () => {
+          for (const address of ['A1', 'B1', 'A2', 'B2']) await runtime.setCellFormula(address, null);
+        });
+      }
+      expect(await range.values()).toEqual([[null, null], [null, null]]);
+      expect(await range.formulas()).toEqual([[null, null], [null, null]]);
+      expect(await range.styleIds()).toEqual([[1, 1], [1, 0]]);
+      expect((await workbook.toModel()).styles).toEqual(original.styles);
+      await runtime.undo();
+      expect(await range.formulas()).toEqual([[null, '1+1'], [null, null]]);
+      expect(runtime.activeSheet().cellsByAddress.get('B1')?.value).toBe(2);
+      expect(await range.styleIds()).toEqual([[1, 1], [1, 0]]);
+      expect(runtime.activeSheet().cellsByAddress.get('A1')?.value).toBe('田');
+      expect(runtime.activeSheet().cellsByAddress.get('B2')?.value).toBe(0);
+      await runtime.redo();
+      const reopened = await ExcelWorkbook.fromZip(await runtime.toZip(), { mode: 'inline' });
+      try {
+        const exported = reopened.worksheets.getItem('Sheet1').getRange('A1:B2');
+        expect(await exported.values()).toEqual([[null, null], [null, null]]);
+        expect(await exported.formulas()).toEqual([[null, null], [null, null]]);
+        expect(await exported.styleIds()).toEqual([[1, 1], [1, 0]]);
+      } finally { await reopened.dispose(); }
+    } finally { await runtime.dispose(); }
+  });
+
   test('allows sheet navigation but rejects workbook mutations in read-only mode', async () => {
     const source = model();
     source.sheets.push({ ...structuredClone(source.sheets[0]!), id: '2', name: 'Summary' });
@@ -331,9 +542,13 @@ describe('spreadsheet runtime', () => {
 
     await runtime.setCellValue('A1', 5);
     expect(runtime.activeSheet().cellsByAddress.get('B1')?.displayText).toBe('15');
+    expect((await workbook.worksheets.getItem('Summary').sheetViews())[0]?.tabSelected).toBe(true);
+    expect((await workbook.worksheets.getItem('Sheet1').sheetViews())[0]?.tabSelected).toBe(false);
     await runtime.setActiveSheet('Sheet1');
 
     expect(runtime.activeSheetName()).toBe('Sheet1');
+    expect((await workbook.worksheets.getItem('Sheet1').sheetViews())[0]?.tabSelected).toBe(true);
+    expect((await workbook.worksheets.getItem('Summary').sheetViews())[0]?.tabSelected).toBe(false);
     expect(runtime.activeSheet().cellsByAddress.get('A1')?.value).toBe('First sheet');
     expect(await workbook.worksheets.getItem('Summary').getRange('A1:B1').values()).toEqual([[5, null]]);
     expect(await workbook.worksheets.getItem('Summary').getRange('B1').formulas()).toEqual([['=A1*3']]);
@@ -628,11 +843,11 @@ describe('spreadsheet runtime', () => {
     await runtime.setColumnWidth(2, 144);
     await runtime.setRowHeight(3, 36);
 
-    expect(runtime.activeSheet().columnMetaByIndex.get(2)?.width).toBeCloseTo(19.85546875);
+    expect(runtime.activeSheet().columnMetaByIndex.get(2)?.width).toBeCloseTo(20.57421875);
     expect(runtime.activeSheet().rowMetaByIndex.get(3)?.height).toBe(36);
 
     await runtime.undo();
-    expect(runtime.activeSheet().columnMetaByIndex.get(2)?.width).toBeCloseTo(19.85546875);
+    expect(runtime.activeSheet().columnMetaByIndex.get(2)?.width).toBeCloseTo(20.57421875);
     expect(runtime.activeSheet().rowMetaByIndex.get(3)?.height).toBeUndefined();
 
     await runtime.undo();
@@ -641,7 +856,7 @@ describe('spreadsheet runtime', () => {
 
     await runtime.redo();
     await runtime.redo();
-    expect(runtime.activeSheet().columnMetaByIndex.get(2)?.width).toBeCloseTo(19.85546875);
+    expect(runtime.activeSheet().columnMetaByIndex.get(2)?.width).toBeCloseTo(20.57421875);
     expect(runtime.activeSheet().rowMetaByIndex.get(3)?.height).toBe(36);
   });
 

@@ -4,6 +4,8 @@ import type { SpreadsheetRange, SpreadsheetSheetRenderModel } from './types.js';
 export interface SpreadsheetSelectionState {
   kind: 'cell' | 'row' | 'column';
   active: { row: number; column: number };
+  /** Moving keyboard endpoint, separate from the fixed selection anchor. */
+  focus?: { row: number; column: number };
   range: SpreadsheetRange;
 }
 

@@ -51,6 +51,17 @@ export function rewriteFormulaReferences(
 
     const match = matchReferenceAt(formula, index);
     if (!match) {
+      // Bracketed table columns are names, not A1 references. External workbook prefixes
+      // are matched above as a complete sheet-qualified reference before reaching here.
+      if (ch === '[') {
+        let depth = 1; let end = index + 1;
+        while (end < formula.length && depth) {
+          if (formula[end] === '[') depth++;
+          if (formula[end] === ']') depth--;
+          end++;
+        }
+        output += formula.slice(index, end); index = end; continue;
+      }
       output += ch;
       index += 1;
       continue;
@@ -534,7 +545,7 @@ function readSheetPrefix(formula: string, start: number): { end: number } | null
     return null;
   }
 
-  const match = /^[A-Za-z_][A-Za-z0-9_.]*!/.exec(formula.slice(start));
+  const match = /^(?:\[[^\]]+\])?[A-Za-z_\u0080-\uFFFF][A-Za-z0-9_.\u0080-\uFFFF]*(?::[A-Za-z_\u0080-\uFFFF][A-Za-z0-9_.\u0080-\uFFFF]*)?!/.exec(formula.slice(start));
   return match ? { end: start + match[0].length } : null;
 }
 

@@ -1,10 +1,69 @@
 import { describe, expect, test } from 'vitest';
 import { ExcelWorkbook, type ExcelWorkbookModel } from '@coco-vexel/coco-office/excel';
-import { buildSpreadsheetClipboardPayload } from '../clipboard.js';
+import { buildSpreadsheetClipboardPayload, clipboardHtml, parseTsv, readSpreadsheetClipboardPayload, serializeRangeToTsv, serializeSpreadsheetClipboardPayload, SPREADSHEET_CLIPBOARD_MIME } from '../clipboard.js';
 import { buildSpreadsheetSheetRenderModel } from '../render-model.js';
 import { SpreadsheetEditorRuntime } from '../runtime.js';
 
 describe('spreadsheet clipboard', () => {
+  test.each(['custom', 'html'])('round-trips a self-contained %s payload without an editor cache', (kind) => {
+    const input = model();
+    input.sheets[0]!.cells[0]!.value = '田\t字\n"帖"';
+    input.sheets[0]!.cells.push({ address: 'D1', row: 1, column: 4, kind: 'formula', value: null, formula: "'Another '' Sheet'!A1" });
+    const payload = buildSpreadsheetClipboardPayload(buildSpreadsheetSheetRenderModel(input.sheets[0]!, input.styles), { startRow: 1, endRow: 4, startColumn: 1, endColumn: 4 }, { sourceWorkbookId: 'source' });
+    const data = { getData: (type: string) => kind === 'custom' && type === SPREADSHEET_CLIPBOARD_MIME ? serializeSpreadsheetClipboardPayload(payload) : kind === 'html' && type === 'text/html' ? clipboardHtml(payload) : '' };
+    expect(readSpreadsheetClipboardPayload(data)).toEqual(payload);
+  });
+
+  test.each(['schema', 'style', 'matrix', 'merge'])('rejects invalid portable %s metadata', (kind) => {
+    const input = model();
+    const payload = buildSpreadsheetClipboardPayload(buildSpreadsheetSheetRenderModel(input.sheets[0]!, input.styles), { startRow: 1, endRow: 4, startColumn: 1, endColumn: 4 });
+    const invalid = JSON.parse(serializeSpreadsheetClipboardPayload(payload));
+    if (kind === 'schema') invalid.schema = 2;
+    if (kind === 'style') invalid.styles = {};
+    if (kind === 'matrix') invalid.values.pop();
+    if (kind === 'merge') invalid.merges.push(invalid.merges[0]);
+    expect(() => readSpreadsheetClipboardPayload({ getData: (type) => type === SPREADSHEET_CLIPBOARD_MIME ? JSON.stringify(invalid) : '' })).toThrow(/格式无效/);
+  });
+
+  test('parses Excel quoted TSV without losing tabs, newlines, quotes, or blank fields', () => {
+    expect(parseTsv('"a\tb"\t"first\r\nsecond"\t"say ""hi"""\t\r\n')).toEqual([['a\tb', 'first\r\nsecond', 'say "hi"', null]]);
+    expect(parseTsv('')).toEqual([[null]]);
+    expect(parseTsv('false\tTRUE\t0')).toEqual([[false, true, 0]]);
+    expect(() => parseTsv('"unterminated')).toThrow(/引号/);
+  });
+
+  test('serializes embedded cell separators as quoted TSV instead of replacing content', async () => {
+    const workbook = await ExcelWorkbook.fromModel(model(), { mode: 'inline' });
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(workbook);
+    try {
+      await runtime.setRangeValues(1, 1, [['a\tb', 'a\nb', 'a"b']]);
+      const range = { startRow: 1, startColumn: 1, endRow: 1, endColumn: 3 };
+      expect(parseTsv(serializeRangeToTsv(runtime.activeSheet(), range))).toEqual([['a\tb', 'a\nb', 'a"b']]);
+    } finally { await runtime.dispose(); }
+  });
+  test.each([
+    { name: 'single blank', values: [[null]] },
+    { name: 'trailing blank row', values: [['田'], [null]] },
+    { name: 'all blank rows', values: [[null], [null], [null]] },
+    { name: 'empty string and falsy values', values: [[''], [' '], [0], [false], [null]] },
+  ])('preserves the shape and raw values of an internal $name copy', async ({ values }) => {
+    const source = model();
+    source.sheets[0]!.mergedRanges = [];
+    const workbook = await ExcelWorkbook.fromModel(source, { mode: 'inline' });
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(workbook);
+    try {
+      await runtime.setRangeValues(1, 1, values);
+      const payload = buildSpreadsheetClipboardPayload(runtime.activeSheet(), {
+        startRow: 1, startColumn: 1, endRow: values.length, endColumn: 1,
+      });
+      expect(payload.values).toEqual(values);
+    } finally { await runtime.dispose(); }
+  });
+
+  test('keeps whitespace, zero, false and explicit blank columns in external text', () => {
+    expect(parseTsv(' \t0\tFALSE\t\r\n')).toEqual([[' ', 0, false, null]]);
+  });
+
   test('preserves merge ranges for internal copy and paste', async () => {
     const workbook = await ExcelWorkbook.fromModel(model(), { mode: 'inline' });
     const runtime = await SpreadsheetEditorRuntime.fromWorkbook(workbook);

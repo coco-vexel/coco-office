@@ -22,7 +22,8 @@ import {
   normalizeSelectionRange,
   type SpreadsheetSelectionState,
 } from './selection.js';
-import { buildSpreadsheetClipboardPayload, parseTsv, type SpreadsheetClipboardPayload } from './clipboard.js';
+import { buildSpreadsheetClipboardPayload, clipboardHtml, clipboardToken, parseTsv, readSpreadsheetClipboardPayload, serializeSpreadsheetClipboardPayload, SPREADSHEET_CLIPBOARD_MIME, type SpreadsheetClipboardPayload } from './clipboard.js';
+import { navigateSpreadsheetSelection, selectSpreadsheetRegion } from './keyboard.js';
 import { getRenderCell } from './render-model.js';
 import { resolveSpreadsheetCellStyle, type SpreadsheetResolvedCellStyle } from './style-resolver.js';
 import { spreadsheetFilterValues, type SpreadsheetColumnFilter } from './filter.js';
@@ -48,6 +49,7 @@ import type {
   SpreadsheetViewport,
 } from './types.js';
 import { EditorReadOnlyError } from '../read-only.js';
+import { ActionConfirmPopover } from '../action-confirm-popover.js';
 
 export interface SpreadsheetEditorChangeEvent {
   kind: 'workbookChange';
@@ -83,6 +85,7 @@ export interface SpreadsheetEditorOptions {
   /** Allows navigation, selection and copy while blocking every workbook mutation. */
   readOnly?: boolean;
   onChange?: (event: SpreadsheetEditorChangeEvent) => void | Promise<void>;
+  onError?: (error: Error) => void;
   showSheetTabs?: boolean;
   /** Isolates editor internals from host-page CSS. Shadow DOM is enabled by default. */
   styleIsolation?: 'shadow' | 'none';
@@ -126,6 +129,8 @@ export interface SpreadsheetEditor {
     run: (editor: SpreadsheetEditor) => Promise<void>,
   ): Promise<void>;
   loadWorkbook(bytes: Uint8Array | ArrayBuffer): Promise<void>;
+  /** Commit an active cell edit and wait for its change notification/persistence. */
+  flushEdits(): Promise<void>;
   toZip(): Promise<Uint8Array>;
   canUndo(): boolean;
   canRedo(): boolean;
@@ -176,14 +181,20 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   private readonly resizeGuide = document.createElement('div');
   private readonly contextMenu = document.createElement('div');
   private readonly filterMenu = document.createElement('div');
+  private readonly sheetDeleteConfirmation: ActionConfirmPopover;
   private readonly cellEditor: SpreadsheetCellEditor;
   private readonly resizeObserver: ResizeObserver;
   private disposed = false;
   private drag: { axis: 'horizontal' | 'vertical'; pointer: number; thumb: number } | null = null;
   private selectionState: SpreadsheetSelectionState = createSelection(1, 1);
   private editingCell: { row: number; column: number } | null = null;
+  private editingCellInitialValue: string | null = null;
+  private pendingGridMutation: Promise<void> = Promise.resolve();
   private editingCellStyle: SpreadsheetResolvedCellStyle | null = null;
   private clipboardPayload: SpreadsheetClipboardPayload | null = null;
+  private clipboardCut = false;
+  private clipboardActive = false;
+  private nextPasteValuesOnly = false;
   private selecting = false;
   private resizeDrag: SpreadsheetResizeDragState | null = null;
   private autoFillDrag: { source: SpreadsheetRange; preview: SpreadsheetRange | null } | null = null;
@@ -202,6 +213,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   private transactionDepth = 0;
   private transactionChanged = false;
   private readOnlyValue: boolean;
+  private sheetActionPending = false;
 
   constructor(private readonly host: HTMLElement, private readonly options: SpreadsheetEditorOptions) {
     this.readOnlyValue = options.readOnly === true;
@@ -261,6 +273,8 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     });
     this.renderRoot.appendChild(this.resizeGuide);
     this.contextMenu.className = 'coco-spreadsheet-context-menu';
+    this.contextMenu.setAttribute('role', 'menu');
+    this.contextMenu.tabIndex = -1;
     Object.assign(this.contextMenu.style, {
       position: 'fixed',
       zIndex: '50',
@@ -273,6 +287,18 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       boxShadow: '0 8px 24px rgba(15, 23, 42, 0.16)',
     });
     this.renderRoot.appendChild(this.contextMenu);
+    this.contextMenu.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        this.hideContextMenu();
+        this.host.focus();
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        const items = Array.from(this.contextMenu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+        const index = items.indexOf(event.target as HTMLButtonElement);
+        items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+      } else return;
+      event.preventDefault();
+      event.stopPropagation();
+    });
     this.filterMenu.className = 'coco-spreadsheet-filter-menu';
     Object.assign(this.filterMenu.style, {
       position: 'fixed', zIndex: '60', display: 'none', width: '240px', maxHeight: '360px',
@@ -280,11 +306,15 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       borderRadius: '6px', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.16)',
     });
     this.renderRoot.appendChild(this.filterMenu);
+    this.sheetDeleteConfirmation = new ActionConfirmPopover(host, this.renderRoot);
     this.cellEditor = new SpreadsheetCellEditor({
       textarea: this.cellEditorElement,
       onCommit: async (value) => this.commitCellEdit(value),
+      onNavigate: (key, reverse) => { this.navigateGrid(key, reverse); this.host.focus({ preventScroll: true }); },
+      onError: (error) => this.reportError(error),
       onCancel: () => {
         this.editingCell = null;
+        this.editingCellInitialValue = null;
         this.editingCellStyle = null;
         this.formulaReferenceRanges = [];
         this.render();
@@ -299,6 +329,9 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.configureScrollbar(this.verticalScrollbar, this.verticalThumb, false);
     this.renderRoot.append(this.horizontalScrollbar, this.verticalScrollbar);
     this.sheetTabs.className = 'coco-spreadsheet-editor-tabs';
+    for (const name of ['pointerdown', 'click', 'dblclick', 'contextmenu']) {
+      this.sheetTabs.addEventListener(name, (event) => event.stopPropagation());
+    }
     if (options.showSheetTabs !== false) this.renderRoot.appendChild(this.sheetTabs);
     this.renderer = new SpreadsheetCanvasRenderer({
       baseCanvas: this.baseCanvas,
@@ -313,7 +346,9 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     host.addEventListener('pointerup', this.handlePointerUp);
     host.addEventListener('pointerleave', this.handlePointerLeave);
     host.addEventListener('keydown', this.handleKeyDown);
+    host.addEventListener('keyup', this.handleKeyUp);
     host.addEventListener('copy', this.handleCopy);
+    host.addEventListener('cut', this.handleCut);
     host.addEventListener('paste', this.handlePaste);
     host.addEventListener('contextmenu', this.handleContextMenu);
     document.addEventListener('pointerdown', this.handleDocumentPointerDown);
@@ -345,6 +380,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.runtime().setReadOnly(readOnly);
     this.readOnlyValue = readOnly;
     this.host.setAttribute('aria-readonly', String(readOnly));
+    this.renderTabs();
     this.render();
   }
 
@@ -393,16 +429,21 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     return this.runtime().activeSheetName();
   }
 
-  async setActiveSheet(name: string): Promise<void> {
-    await this.runtime().setActiveSheet(name);
-    this.scroll = { x: 0, y: 0 };
-    this.selectionState = createSelection(1, 1);
-    this.render();
-    this.renderTabs();
+  setActiveSheet(name: string): Promise<void> {
+    return this.queueGridMutation(async () => {
+      await this.runtime().setActiveSheet(name);
+      this.copiedRange = null;
+      this.scroll = { x: 0, y: 0 };
+      this.selectionState = expandSelectionForMergedRanges(createSelection(1, 1), this.runtime().activeSheet());
+      this.render(); this.renderTabs();
+      if (!this.isReadOnly()) await this.emitChange();
+    });
   }
 
   async addSheet(name: string): Promise<void> {
+    await this.flushEdits();
     await this.runtime().addSheet(name);
+    this.copiedRange = null;
     this.scroll = { x: 0, y: 0 };
     this.selectionState = createSelection(1, 1);
     this.renderTabs();
@@ -411,14 +452,18 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async renameSheet(sheetName: string, name: string): Promise<void> {
+    await this.flushEdits();
     await this.runtime().renameSheet(sheetName, name);
+    this.copiedRange = null;
     this.renderTabs();
     this.render();
     await this.emitChange();
   }
 
   async copySheet(sheetName: string, newName: string): Promise<void> {
+    await this.flushEdits();
     await this.runtime().copySheet(sheetName, newName);
+    this.copiedRange = null;
     this.scroll = { x: 0, y: 0 };
     this.selectionState = createSelection(1, 1);
     this.renderTabs();
@@ -427,7 +472,11 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async deleteSheet(sheetName: string): Promise<void> {
+    await this.flushEdits();
     await this.runtime().deleteSheet(sheetName);
+    this.copiedRange = null;
+    // Sheet deletion is not undoable; discard edits that may refer to the removed sheet.
+    this.runtime().workbook().history().clear();
     this.scroll = { x: 0, y: 0 };
     this.selectionState = createSelection(1, 1);
     this.renderTabs();
@@ -436,29 +485,36 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async moveSheet(sheetName: string, toIndex: number): Promise<void> {
+    await this.flushEdits();
     await this.runtime().moveSheet(sheetName, toIndex);
+    this.copiedRange = null;
     this.renderTabs();
     this.render();
     await this.emitChange();
   }
 
   async setCellValue(address: string, value: ExcelCellValue): Promise<void> {
+    await this.flushEdits();
     await this.runtime().setCellValue(address, value, { mergeUndo: true });
     this.render();
     await this.emitChange();
   }
 
   async setCellFormula(address: string, formula: string): Promise<void> {
+    await this.flushEdits();
     await this.runtime().setCellFormula(address, formula, { mergeUndo: true });
     this.render();
     await this.emitChange();
   }
 
-  async formatSelection(kind: 'bold' | 'italic' | 'underline'): Promise<void> {
-    await this.applyFormat(kind);
+  formatSelection(kind: 'bold' | 'italic' | 'underline'): Promise<void> {
+    const range = normalizeSelectionRange(this.selectionState.range);
+    const address = formatCellAddress(this.selectionState.active.row, this.selectionState.active.column);
+    return this.queueGridMutation(async () => this.applyFormat(kind, range, address));
   }
 
   async setSelectionFontColor(color: ExcelColorModel | undefined): Promise<void> {
+    await this.flushEdits();
     const range = normalizeSelectionRange(this.selectionState.range);
     await this.runtime().setRangeFontColor(
       range.startRow,
@@ -472,6 +528,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async setSelectionFillColor(color: ExcelColorModel | undefined): Promise<void> {
+    await this.flushEdits();
     const range = normalizeSelectionRange(this.selectionState.range);
     await this.runtime().setRangeFillColor(
       range.startRow,
@@ -485,10 +542,12 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async setSelectionHorizontalAlign(alignment: 'left' | 'center' | 'right'): Promise<void> {
+    await this.flushEdits();
     await this.applyAlignment(alignment);
   }
 
   async setSelectionVerticalAlign(alignment: 'top' | 'center' | 'bottom'): Promise<void> {
+    await this.flushEdits();
     const range = normalizeSelectionRange(this.selectionState.range);
     await this.runtime().setRangeVerticalAlign(
       range.startRow,
@@ -502,6 +561,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async setSelectionNumberFormat(code: string | undefined): Promise<void> {
+    await this.flushEdits();
     const range = normalizeSelectionRange(this.selectionState.range);
     await this.runtime().setRangeNumberFormat(
       range.startRow,
@@ -515,6 +575,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async setSelectionBorder(mode: 'all' | 'outer' | 'inner' | 'clear'): Promise<void> {
+    await this.flushEdits();
     const range = normalizeSelectionRange(this.selectionState.range);
     await this.runtime().setRangeBorder(
       range.startRow,
@@ -529,8 +590,13 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
 
   async loadWorkbook(bytes: Uint8Array | ArrayBuffer): Promise<void> {
     this.assertAlive();
+    await this.flushEdits();
     const previous = this.runtimeValue;
     this.runtimeValue = null;
+    this.copiedRange = null;
+    this.clipboardPayload = null;
+    this.clipboardCut = false;
+    this.clipboardActive = false;
     this.scroll = { x: 0, y: 0 };
     if (previous) await previous.dispose();
     this.runtimeValue = await SpreadsheetEditorRuntime.fromZip(bytes, {
@@ -551,22 +617,36 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async toZip(): Promise<Uint8Array> {
+    await this.flushEdits();
     return this.runtime().toZip();
+  }
+
+  async flushEdits(): Promise<void> {
+    // Capture before committing: newly queued edits must not wait on themselves.
+    const mutation = this.pendingGridMutation;
+    await this.cellEditor.commit();
+    await mutation;
   }
 
   canUndo(): boolean { return this.runtime().canUndo(); }
   canRedo(): boolean { return this.runtime().canRedo(); }
 
-  async undo(): Promise<void> {
-    await this.runtime().undo();
-    this.render();
-    await this.emitChange();
+  undo(): Promise<void> {
+    return this.queueGridMutation(async () => {
+      if (!this.runtime().canUndo()) return;
+      await this.runtime().undo();
+      this.cancelCopyOutline();
+      this.renderTabs(); this.render(); await this.emitChange();
+    });
   }
 
-  async redo(): Promise<void> {
-    await this.runtime().redo();
-    this.render();
-    await this.emitChange();
+  redo(): Promise<void> {
+    return this.queueGridMutation(async () => {
+      if (!this.runtime().canRedo()) return;
+      await this.runtime().redo();
+      this.cancelCopyOutline();
+      this.renderTabs(); this.render(); await this.emitChange();
+    });
   }
 
   subscribe(listener: (event: SpreadsheetEditorChangeEvent) => void): () => void {
@@ -583,6 +663,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     options: SpreadsheetUserTransactionOptions,
     run: (editor: SpreadsheetEditor) => Promise<void>,
   ): Promise<void> {
+    await this.flushEdits();
     this.transactionDepth += 1;
     try {
       await this.runtime().runUserTransaction(options, () => run(this));
@@ -598,7 +679,9 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
 
   destroy(): void {
     if (this.disposed) return;
+    const pendingEdit = this.flushEdits();
     this.disposed = true;
+    this.cellEditor.destroy();
     this.resizeObserver.disconnect();
     this.host.removeEventListener('wheel', this.handleWheel);
     this.host.removeEventListener('click', this.handleClick);
@@ -608,17 +691,22 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.host.removeEventListener('pointerup', this.handlePointerUp);
     this.host.removeEventListener('pointerleave', this.handlePointerLeave);
     this.host.removeEventListener('keydown', this.handleKeyDown);
+    this.host.removeEventListener('keyup', this.handleKeyUp);
     this.host.removeEventListener('copy', this.handleCopy);
+    this.host.removeEventListener('cut', this.handleCut);
     this.host.removeEventListener('paste', this.handlePaste);
     this.host.removeEventListener('contextmenu', this.handleContextMenu);
     document.removeEventListener('pointerdown', this.handleDocumentPointerDown);
+    this.sheetDeleteConfirmation.destroy();
     this.contextMenu.remove();
     this.filterMenu.remove();
     this.unsupportedObjectLayer.remove();
     this.host.replaceChildren();
     const runtime = this.runtimeValue;
-    this.runtimeValue = null;
-    void runtime?.dispose();
+    void pendingEdit.catch((error) => this.reportError(error)).finally(() => {
+      this.runtimeValue = null;
+      void runtime?.dispose();
+    });
   }
 
   private render(): void {
@@ -763,7 +851,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     if (this.filterMenu.style.display === 'block') this.hideFilterMenu();
     if (this.editingCell) {
       if (this.eventPathContains(event, this.cellEditorElement)) return;
-      this.cellEditor.cancel();
+      void this.cellEditor.commit().catch((error) => this.reportError(error));
     }
     if (!this.viewport || !this.layout) return;
     const chartHit = this.chartAtPoint(this.eventPoint(event));
@@ -833,7 +921,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   private readonly handlePointerDown = (event: PointerEvent): void => {
     if (this.editingCell) {
       if (this.eventPathContains(event, this.cellEditorElement)) return;
-      this.cellEditor.cancel();
+      void this.cellEditor.commit().catch((error) => this.reportError(error));
     }
     if (event.button !== 0 || !this.viewport || !this.layout) return;
     const point = this.eventPoint(event);
@@ -876,6 +964,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     }
     const hit = this.viewport.hitTest(point);
     if (hit.kind !== 'cell' && hit.kind !== 'rowHeader' && hit.kind !== 'columnHeader') return;
+    this.host.focus({ preventScroll: true });
     const model = this.runtime().activeSheet();
     if (hit.kind === 'cell') {
       this.selectionState = expandSelectionForMergedRanges(createSelection(hit.row, hit.column), model);
@@ -1059,67 +1148,200 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
-    if (this.editingCell) return;
-    const { row, column } = this.selectionState.active;
-    if (event.key === 'F2' || event.key === 'Enter') {
-      if (this.isReadOnly()) return;
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || this.editingCell || this.isControlEvent(event)) return;
+    const command = event.ctrlKey || event.metaKey;
+    const key = event.key.toLowerCase();
+    if (command && !event.altKey) {
+      // Browser clipboard events carry the real clipboard and its user permission.
+      if (key === 'c' || key === 'x' || key === 'v') {
+        if (key === 'v') this.nextPasteValuesOnly = event.shiftKey;
+        return;
+      }
+      if (key === 'z' || (key === 'y' && !event.shiftKey)) {
+        event.preventDefault();
+        if (!this.isReadOnly()) void (key === 'y' || event.shiftKey ? this.redo() : this.undo()).catch((error) => this.reportError(error));
+        return;
+      }
+      if (key === 'a' && !event.shiftKey) {
+        event.preventDefault();
+        this.selectionState = selectSpreadsheetRegion(this.selectionState, this.runtime().activeSheet(), this.gridBounds());
+        this.render(); return;
+      }
+      if (!event.shiftKey && (key === 'b' || key === 'i' || key === 'u')) {
+        event.preventDefault();
+        if (!this.isReadOnly()) void this.formatSelection(key === 'b' ? 'bold' : key === 'i' ? 'italic' : 'underline').catch((error) => this.reportError(error));
+        return;
+      }
+      if (!event.shiftKey && (key === 'd' || key === 'r')) {
+        event.preventDefault();
+        if (!this.isReadOnly()) void this.fillSelectionFromEdge(key === 'd' ? 'down' : 'right').catch((error) => this.reportError(error));
+        return;
+      }
+      if (!event.shiftKey && (event.key === 'PageUp' || event.key === 'PageDown')) {
+        event.preventDefault();
+        const names = this.runtime().model().sheets.map((sheet) => sheet.name);
+        const index = names.indexOf(this.activeSheetName()) + (event.key === 'PageUp' ? -1 : 1);
+        if (names[index]) void this.setActiveSheet(names[index]!).catch((error) => this.reportError(error));
+        return;
+      }
+    }
+    if (!event.altKey && (event.code === 'Space' || event.key === ' ')) {
+      if (command || event.shiftKey) {
+        event.preventDefault();
+        const { row, column } = this.selectionState.active;
+        const bounds = this.gridBounds();
+        this.selectionState = command && event.shiftKey ? { ...createSelection(row, column), range: { startRow: 1, startColumn: 1, endRow: bounds.rowCount, endColumn: bounds.columnCount } }
+          : command ? createColumnSelection(column, bounds) : createRowSelection(row, bounds);
+        this.render(); return;
+      }
+    }
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || this.selectedChartIndex !== null) return;
       event.preventDefault();
-      this.openCellEditor();
+      if (!this.isReadOnly()) void this.clearSelection().catch((error) => this.reportError(error));
       return;
     }
-    const deltas: Record<string, [number, number]> = {
-      ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1],
-    };
-    const delta = deltas[event.key];
-    if (!delta) return;
-    const model = this.runtime().activeSheet();
-    this.selectionState = createSelection(
-      Math.max(1, Math.min(model.maxRow, row + delta[0])),
-      Math.max(1, Math.min(model.maxColumn, column + delta[1])),
-    );
+    if (event.key === 'Escape' && (this.copiedRange || this.clipboardActive)) {
+      this.cancelCopyOutline();
+      this.render();
+      event.preventDefault();
+      return;
+    }
+    if (event.key === 'Enter' && !command && !event.shiftKey && !event.altKey && this.clipboardActive && this.clipboardPayload && !this.isReadOnly()) {
+      event.preventDefault();
+      const data = new DataTransfer();
+      data.setData('text/plain', this.clipboardPayload.text);
+      data.setData(SPREADSHEET_CLIPBOARD_MIME, this.clipboardPayload.id);
+      void this.pasteClipboardData(data, false, true).catch((error) => this.reportError(error));
+      return;
+    }
+    if (event.key === 'F2' && !command && !event.altKey && !event.shiftKey) {
+      if (this.isReadOnly()) return;
+      event.preventDefault();
+      void this.openCellEditor().catch((error) => this.reportError(error));
+      return;
+    }
+    if (command && !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    if (!event.altKey && this.navigateGrid(event.key, event.shiftKey, command)) { event.preventDefault(); return; }
+    if (!command && !event.altKey && Array.from(event.key).length === 1 && !this.isReadOnly()) {
+      event.preventDefault();
+      void this.openCellEditor(event.key).catch((error) => this.reportError(error));
+    }
+  };
+
+  private fillSelectionFromEdge(direction: 'down' | 'right'): Promise<void> {
+    const target = normalizeSelectionRange(this.selectionState.range);
+    const source = { ...target };
+    if (direction === 'down') {
+      source.endRow = source.startRow;
+      if (target.startRow === target.endRow) { if (target.startRow === 1) return Promise.resolve(); source.startRow--; source.endRow--; }
+    } else {
+      source.endColumn = source.startColumn;
+      if (target.startColumn === target.endColumn) { if (target.startColumn === 1) return Promise.resolve(); source.startColumn--; source.endColumn--; }
+    }
+    return this.queueGridMutation(async () => {
+      const payload = buildSpreadsheetClipboardPayload(this.runtime().activeSheet(), source);
+      await this.runtime().pasteClipboard(payload, target);
+      this.cancelCopyOutline(); this.render(); await this.emitChange();
+    });
+  }
+
+  private readonly handleKeyUp = (event: KeyboardEvent): void => {
+    if (event.key.toLowerCase() === 'v') this.nextPasteValuesOnly = false;
+  };
+
+  private gridBounds() { return { rowCount: this.layout?.rowCount ?? this.runtime().activeSheet().maxRow, columnCount: this.layout?.columnCount ?? this.runtime().activeSheet().maxColumn }; }
+
+  private navigateGrid(key: string, reverse = false, command = false): boolean {
+    const next = navigateSpreadsheetSelection(this.selectionState, key, { shift: reverse, command, pageRows: Math.max(1, Math.floor(this.host.getBoundingClientRect().height / (this.layout?.defaultRowHeight ?? 22)) - 3) }, this.runtime().activeSheet(), this.gridBounds());
+    if (!next) return false;
+    this.selectionState = next;
+    const layout = this.layout;
+    if (layout && this.viewport) {
+      const cell = layout.getCellLogicalRect(next.active.row, next.active.column);
+      const frozen = this.viewport.freeze;
+      const size = this.host.getBoundingClientRect();
+      let { x, y } = this.scroll;
+      if (next.active.column > frozen.frozenColumns) {
+        x = Math.max(cell.x + cell.width - (size.width - layout.rowHeaderWidth - 12), Math.min(x, cell.x - layout.getColumnX(frozen.frozenColumns + 1)));
+      }
+      if (next.active.row > frozen.frozenRows) {
+        y = Math.max(cell.y + cell.height - (size.height - layout.columnHeaderHeight - (this.options.showSheetTabs === false ? 0 : 40) - 12), Math.min(y, cell.y - layout.getRowY(frozen.frozenRows + 1)));
+      }
+      this.setScroll(Math.max(0, x), Math.max(0, y));
+    } else this.render();
+    return true;
+  }
+
+  private isControlEvent(event: Event): boolean {
+    return [this.cellEditorElement, this.sheetTabs, this.contextMenu, this.filterMenu].some((node) => this.eventPathContains(event, node)) ||
+      event.composedPath().some((node) => node instanceof HTMLElement && (node.isContentEditable || node.matches('input, textarea, select, button, [role="textbox"]')));
+  }
+
+  private cancelCopyOutline(): void { this.copiedRange = null; this.clipboardCut = false; this.clipboardActive = false; }
+
+  private readonly handleCopy = (event: ClipboardEvent): void => {
+    if (this.editingCell || this.isControlEvent(event) || !event.clipboardData) return;
+    const range = normalizeSelectionRange(this.selectionState.range);
+    const payload = buildSpreadsheetClipboardPayload(this.runtime().activeSheet(), range, { sourceWorkbookId: this.runtime().workbook().workbookId });
+    this.clipboardPayload = payload;
+    this.clipboardCut = false;
+    this.clipboardActive = true;
+    this.copiedRange = range;
+    event.clipboardData?.setData('text/plain', payload.text);
+    event.clipboardData.setData(SPREADSHEET_CLIPBOARD_MIME, serializeSpreadsheetClipboardPayload(payload));
+    event.clipboardData.setData('text/html', clipboardHtml(payload));
     event.preventDefault();
     this.render();
   };
 
-  private readonly handleCopy = (event: ClipboardEvent): void => {
-    const range = normalizeSelectionRange(this.selectionState.range);
-    const payload = buildSpreadsheetClipboardPayload(this.runtime().activeSheet(), range);
-    this.clipboardPayload = payload;
-    this.copiedRange = range;
-    event.clipboardData?.setData('text/plain', payload.text);
-    event.preventDefault();
+  private readonly handleCut = (event: ClipboardEvent): void => {
+    if (this.editingCell || this.isControlEvent(event)) return;
+    if (this.isReadOnly()) { event.preventDefault(); return; }
+    this.handleCopy(event);
+    if (event.defaultPrevented && this.clipboardPayload) this.clipboardCut = true;
   };
 
   private readonly handlePaste = (event: ClipboardEvent): void => {
+    if (this.editingCell || this.isControlEvent(event)) return;
     if (this.isReadOnly()) {
       event.preventDefault();
       return;
     }
-    const text = event.clipboardData?.getData('text/plain') ?? '';
-    if (!text) return;
+    const data = event.clipboardData;
+    if (!data) return;
+    try { if (!data.types.includes('text/plain') && !clipboardToken(data)) return; }
+    catch (error) { event.preventDefault(); this.reportError(error); return; }
     event.preventDefault();
-    const values = this.clipboardPayload?.text === text ? this.clipboardPayload.values : parseTsv(text);
-    void this.runtime().pasteRange(this.selectionState.active.row, this.selectionState.active.column, values, {
-      mode: 'all',
-      merges: this.clipboardPayload?.text === text ? this.clipboardPayload.merges : [],
-      styleIds: this.clipboardPayload?.text === text ? this.clipboardPayload.styleIds : [],
-    }).then(async () => {
-      const pastedSelection = expandSelectionForMergedRanges({
-        kind: 'cell',
-        active: this.selectionState.active,
-        range: {
-          startRow: this.selectionState.active.row,
-          startColumn: this.selectionState.active.column,
-          endRow: this.selectionState.active.row + values.length - 1,
-          endColumn: this.selectionState.active.column + Math.max(1, values.reduce((max, row) => Math.max(max, row.length), 0)) - 1,
-        },
-      }, this.runtime().activeSheet());
-      this.selectionState = pastedSelection;
-      this.copiedRange = normalizeSelectionRange(pastedSelection.range);
-      this.render();
-      await this.emitChange();
-    });
+    const valuesOnly = this.nextPasteValuesOnly; this.nextPasteValuesOnly = false;
+    void this.pasteClipboardData(data, valuesOnly).catch((error) => this.reportError(error));
   };
+
+  private async pasteClipboardData(data: DataTransfer, valuesOnly = false, finishCopy = false): Promise<void> {
+    if (!data.types.includes('text/plain') && !clipboardToken(data)) return Promise.resolve();
+    const text = data.getData('text/plain');
+    const token = clipboardToken(data);
+    const local = this.clipboardPayload?.id === token ? this.clipboardPayload : undefined;
+    const internal = local ?? readSpreadsheetClipboardPayload(data) ?? undefined;
+    const target = normalizeSelectionRange(this.selectionState.range);
+    const originalSelection = this.selectionState;
+    const cut = !!local && this.clipboardCut && !valuesOnly;
+    const values = internal?.values ?? parseTsv(text);
+    if (!values.length) return Promise.resolve();
+    return this.queueGridMutation(async () => {
+      let range: SpreadsheetRange;
+      const payload: SpreadsheetClipboardPayload = internal ?? {
+        id: 'external', text, values, sourceSheet: this.activeSheetName(),
+        sourceRange: { ...target, endRow: target.startRow + values.length - 1, endColumn: target.startColumn + values.reduce((max, row) => Math.max(max, row.length), 0) - 1 },
+        formulas: values.map((row) => row.map((value) => typeof value === 'string' && value.startsWith('=') ? value.slice(1) : null)),
+        styleIds: [], merges: [],
+      };
+      range = await this.runtime().pasteClipboard(payload, target, { cut, valuesOnly });
+      if (cut || finishCopy) this.cancelCopyOutline();
+      if (this.selectionState === originalSelection) this.selectionState = expandSelectionForMergedRanges({ kind: 'cell', active: { row: range.startRow, column: range.startColumn }, range }, this.runtime().activeSheet());
+      this.render(); await this.emitChange();
+    });
+  }
 
   private readonly handleContextMenu = (event: MouseEvent): void => {
     if (!this.viewport || !this.layout) return;
@@ -1161,12 +1383,13 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
           { label: 'Undo', disabled: !this.canUndo(), action: () => this.undo() },
           { label: 'Redo', disabled: !this.canRedo(), action: () => this.redo() },
           { label: 'Copy', action: () => this.copySelection() },
+          { label: 'Cut', action: () => this.copySelection(true) },
           { label: 'Paste', action: () => this.pasteFromClipboard() },
           { label: 'Clear cells', action: () => this.clearSelection() },
           { label: 'Clear format', action: () => this.clearSelectionFormat() },
-          { label: 'Bold', action: () => this.applyFormat('bold') },
-          { label: 'Italic', action: () => this.applyFormat('italic') },
-          { label: 'Underline', action: () => this.applyFormat('underline') },
+          { label: 'Bold', action: () => this.formatSelection('bold') },
+          { label: 'Italic', action: () => this.formatSelection('italic') },
+          { label: 'Underline', action: () => this.formatSelection('underline') },
           { label: 'Align left', action: () => this.applyAlignment('left') },
           { label: 'Align center', action: () => this.applyAlignment('center') },
           { label: 'Align right', action: () => this.applyAlignment('right') },
@@ -1184,11 +1407,21 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
         { label: 'Sort Z-A', action: () => this.sortColumn(columnHeader, 'desc') },
       );
     }
+    this.showContextMenu(items, x, y);
+  }
+
+  private showContextMenu(
+    items: Array<{ label: string; disabled?: boolean; title?: string; action: () => void | Promise<void> }>,
+    x: number,
+    y: number,
+  ): void {
     this.contextMenu.replaceChildren();
     for (const item of items) {
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = item.label;
+      button.setAttribute('role', 'menuitem');
+      if (item.title) button.title = item.title;
       button.disabled = item.disabled === true;
       Object.assign(button.style, {
         display: 'block', width: '100%', padding: '6px 10px', border: '0',
@@ -1198,11 +1431,15 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       button.addEventListener('mouseleave', () => { button.style.background = 'transparent'; });
       button.addEventListener('click', () => {
         this.hideContextMenu();
-        void item.action();
+        void Promise.resolve().then(item.action).catch((error) => this.reportError(error));
       });
       this.contextMenu.appendChild(button);
     }
     Object.assign(this.contextMenu.style, { left: `${x}px`, top: `${y}px`, display: 'block' });
+    const bounds = this.contextMenu.getBoundingClientRect();
+    this.contextMenu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - bounds.width - 4))}px`;
+    this.contextMenu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - bounds.height - 4))}px`;
+    (this.contextMenu.querySelector<HTMLButtonElement>('button:not(:disabled)') ?? this.contextMenu).focus();
   }
 
   private openFilterMenu(column: number, x: number, y: number): void {
@@ -1272,6 +1509,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   private async sortColumn(column: number, direction: 'asc' | 'desc'): Promise<void> {
+    await this.flushEdits();
     const model = this.runtime().activeSheet();
     await this.runtime().sortRows(1, model.maxRow, column, direction);
     this.render();
@@ -1279,10 +1517,12 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async sortActiveColumn(direction: 'asc' | 'desc'): Promise<void> {
+    await this.flushEdits();
     await this.sortColumn(this.selectionState.active.column, direction);
   }
 
   async filterColumn(column: number, values: readonly string[] | null): Promise<void> {
+    await this.flushEdits();
     this.assertWritable();
     if (values === null) this.columnFilters.delete(column);
     else this.columnFilters.set(column, [...values]);
@@ -1298,47 +1538,87 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     return row >= range.startRow && row <= range.endRow && column >= range.startColumn && column <= range.endColumn;
   }
 
-  private async copySelection(): Promise<void> {
-    const payload = buildSpreadsheetClipboardPayload(this.runtime().activeSheet(), normalizeSelectionRange(this.selectionState.range));
+  private async copySelection(cut = false): Promise<void> {
+    await this.flushEdits();
+    if (cut) this.assertWritable();
+    const range = normalizeSelectionRange(this.selectionState.range);
+    const payload = buildSpreadsheetClipboardPayload(this.runtime().activeSheet(), range, { sourceWorkbookId: this.runtime().workbook().workbookId });
     this.clipboardPayload = payload;
-    try { await navigator.clipboard.writeText(payload.text); } catch { /* Clipboard events still support internal copy. */ }
+    this.clipboardCut = cut;
+    this.clipboardActive = true;
+    this.copiedRange = range;
+    this.render();
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/plain': new Blob([payload.text], { type: 'text/plain' }),
+          'text/html': new Blob([clipboardHtml(payload)], { type: 'text/html' }),
+        })]);
+      } else await navigator.clipboard.writeText(payload.text);
+    } catch { this.cancelCopyOutline(); this.render(); throw new Error('无法写入剪贴板，请使用 Ctrl/Command+C 或 X。'); }
   }
 
   private async pasteFromClipboard(): Promise<void> {
-    let text = '';
-    try { text = await navigator.clipboard.readText(); } catch { return; }
-    if (!text) return;
-    const event = new ClipboardEvent('paste', { clipboardData: new DataTransfer() });
-    event.clipboardData?.setData('text/plain', text);
-    this.handlePaste(event);
+    await this.flushEdits();
+    const data = new DataTransfer();
+    try {
+      if (navigator.clipboard.read) {
+        const items = await navigator.clipboard.read();
+        for (const item of items) for (const type of ['text/plain', 'text/html']) {
+          if (item.types.includes(type)) data.setData(type, await (await item.getType(type)).text());
+        }
+      } else data.setData('text/plain', await navigator.clipboard.readText());
+    } catch { throw new Error('无法读取剪贴板，请使用 Ctrl/Command+V。'); }
+    await this.pasteClipboardData(data);
   }
 
-  async clearSelection(): Promise<void> {
+  clearSelection(): Promise<void> {
+    // Preserve the selection from the keypress even if focus or selection moves.
     const range = normalizeSelectionRange(this.selectionState.range);
-    await this.runtime().clearRange(range.startRow, range.startColumn, range.endRow - range.startRow + 1, range.endColumn - range.startColumn + 1);
-    this.render();
-    await this.emitChange();
+    return this.queueGridMutation(async () => {
+      await this.runtime().clearRange(range.startRow, range.startColumn, range.endRow - range.startRow + 1, range.endColumn - range.startColumn + 1);
+      this.cancelCopyOutline();
+      this.render();
+      await this.emitChange();
+    });
+  }
+
+  private queueGridMutation(run: () => Promise<void>): Promise<void> {
+    const pending = this.flushEdits().then(run);
+    this.pendingGridMutation = pending;
+    const finish = () => {
+      if (this.pendingGridMutation === pending) this.pendingGridMutation = Promise.resolve();
+    };
+    void pending.then(finish, finish);
+    return pending;
   }
 
   async clearSelectionFormat(): Promise<void> {
+    await this.flushEdits();
     const range = normalizeSelectionRange(this.selectionState.range);
     await this.runtime().clearRangeFormat(range.startRow, range.startColumn, range.endRow - range.startRow + 1, range.endColumn - range.startColumn + 1);
     this.render();
     await this.emitChange();
   }
 
-  private async applyFormat(kind: 'bold' | 'italic' | 'underline'): Promise<void> {
-    const range = normalizeSelectionRange(this.selectionState.range);
+  private async applyFormat(kind: 'bold' | 'italic' | 'underline', range: SpreadsheetRange, address: string): Promise<void> {
     const rows = range.endRow - range.startRow + 1;
     const columns = range.endColumn - range.startColumn + 1;
-    if (kind === 'bold') await this.runtime().setRangeBold(range.startRow, range.startColumn, rows, columns, true);
-    if (kind === 'italic') await this.runtime().setRangeItalic(range.startRow, range.startColumn, rows, columns, true);
-    if (kind === 'underline') await this.runtime().setRangeUnderline(range.startRow, range.startColumn, rows, columns, true);
+    const model = this.runtime().activeSheet();
+    const cell = model.cellsByAddress.get(address);
+    const format = model.styles.cellFormats[cell?.styleId ?? 0];
+    const font = model.styles.fonts[format?.fontId ?? 0];
+    const enabled = font?.[kind] !== true;
+    if (kind === 'bold') await this.runtime().setRangeBold(range.startRow, range.startColumn, rows, columns, enabled);
+    if (kind === 'italic') await this.runtime().setRangeItalic(range.startRow, range.startColumn, rows, columns, enabled);
+    if (kind === 'underline') await this.runtime().setRangeUnderline(range.startRow, range.startColumn, rows, columns, enabled);
+    this.cancelCopyOutline();
     this.render();
     await this.emitChange();
   }
 
   private async applyAlignment(alignment: 'left' | 'center' | 'right'): Promise<void> {
+    await this.flushEdits();
     const range = normalizeSelectionRange(this.selectionState.range);
     await this.runtime().setRangeHorizontalAlign(
       range.startRow,
@@ -1352,6 +1632,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async mergeSelection(): Promise<void> {
+    await this.flushEdits();
     const range = normalizeSelectionRange(this.selectionState.range);
     if (range.startRow === range.endRow && range.startColumn === range.endColumn) return;
     await this.runtime().mergeRange(
@@ -1366,6 +1647,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async unmergeSelection(): Promise<void> {
+    await this.flushEdits();
     const range = normalizeSelectionRange(this.selectionState.range);
     const addresses = [...this.runtime().activeSheet().mergeMasterByAddress.values()]
       .filter((merge) => rangesIntersect(range, merge.range))
@@ -1377,6 +1659,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   async freezeSelection(): Promise<void> {
+    await this.flushEdits();
     const active = this.selectionState.active;
     await this.runtime().setFreezePanes(Math.max(0, active.row - 1), Math.max(0, active.column - 1));
     this.render();
@@ -1384,19 +1667,32 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   private async commitResizeDrag(drag: SpreadsheetResizeDragState): Promise<void> {
+    await this.flushEdits();
     if (drag.currentSize === drag.startSize) {
       this.render();
       return;
     }
-    if (drag.kind === 'column') await this.runtime().setColumnWidth(drag.index, drag.currentSize);
-    else await this.runtime().setRowHeight(drag.index, drag.currentSize * 72 / 96);
+    if (drag.kind === 'column') {
+      await this.runtime().setColumnWidth(
+        drag.index,
+        drag.currentSize,
+        this.layout?.maximumDigitWidth,
+      );
+    }
+    else {
+      const pointsToCssPixels = this.layout?.pointsToCssPixels ?? 1.2;
+      await this.runtime().setRowHeight(drag.index, drag.currentSize / pointsToCssPixels);
+    }
     this.render();
     await this.emitChange();
   }
 
-  private openCellEditor(): void {
+  private async openCellEditor(initialText?: string): Promise<void> {
+    await this.flushEdits();
+    if (this.disposed) return;
     if (this.isReadOnly()) return;
     if (!this.layout || !this.viewport) return;
+    this.cancelCopyOutline();
     const cell = this.selectionState.active;
     const viewport = this.viewport.findViewport({
       x: this.layout.rowHeaderWidth + 1,
@@ -1424,22 +1720,31 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.editingCell = cell;
     this.editingCellStyle = cellStyle;
     const value = renderCell?.formula ? `=${renderCell.formula}` : renderCell?.displayText ?? '';
-    this.formulaReferenceRanges = formulaReferenceRangesFromText(value);
-    this.cellEditor.open(rect, value);
+    this.editingCellInitialValue = value;
+    const enteredValue = initialText ?? value;
+    this.formulaReferenceRanges = formulaReferenceRangesFromText(enteredValue);
+    this.cellEditor.open(rect, enteredValue);
+    this.cellEditorElement.setSelectionRange(enteredValue.length, enteredValue.length);
     this.alignCellEditor(rect, cellStyle);
     this.render();
   }
 
   private async commitCellEdit(value: string): Promise<void> {
     const cell = this.editingCell;
+    const initialValue = this.editingCellInitialValue;
     this.editingCell = null;
+    this.editingCellInitialValue = null;
     this.editingCellStyle = null;
     this.formulaReferenceRanges = [];
     if (!cell) return;
+    if (value === initialValue) {
+      this.render();
+      return;
+    }
     this.assertWritable();
     const address = formatCellAddress(cell.row, cell.column);
-    if (value.startsWith('=')) await this.runtime().setCellFormula(address, value.slice(1), { mergeUndo: true });
-    else await this.runtime().setCellValue(address, coerceEditorValue(value), { mergeUndo: true });
+    if (value.startsWith('=')) await this.runtime().setCellFormula(address, value.slice(1));
+    else await this.runtime().setCellValue(address, coerceEditorValue(value));
     this.render();
     await this.emitChange();
   }
@@ -1511,7 +1816,8 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       this.transactionChanged = true;
       return;
     }
-    const event = { kind: 'workbookChange' as const, bytes: await this.toZip() };
+    // A cell commit emits here; calling public toZip() would wait on that same commit.
+    const event = { kind: 'workbookChange' as const, bytes: await this.runtime().toZip() };
     for (const listener of this.listeners) listener(event);
     await this.options.onChange?.(event);
   }
@@ -1531,9 +1837,57 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     for (const listener of this.stateListeners) listener(event);
   }
 
+  private reportError(error: unknown): void {
+    const cause = error instanceof Error ? error : new Error(String(error));
+    if (this.options.onError) this.options.onError(cause);
+    else console.error('[spreadsheet-editor]', cause);
+  }
+
+  private async runSheetUiAction(action: () => Promise<void>): Promise<void> {
+    if (this.sheetActionPending) return;
+    this.sheetActionPending = true;
+    this.hideContextMenu();
+    this.hideFilterMenu();
+    this.renderTabs();
+    try {
+      await this.flushEdits();
+      await action();
+      this.host.focus({ preventScroll: true });
+    } catch (error) {
+      this.reportError(error);
+    } finally {
+      this.sheetActionPending = false;
+      if (!this.disposed) this.renderTabs();
+    }
+  }
+
+  private async createSheetFromTabs(): Promise<void> {
+    const names = new Set(this.runtime().model().sheets.map((sheet) => sheet.name.toLowerCase()));
+    let number = 1;
+    while (names.has(`sheet${number}`)) number += 1;
+    await this.addSheet(`Sheet${number}`);
+  }
+
+  private requestSheetDeletion(sheetName: string, anchor: HTMLButtonElement): void {
+    if (this.isReadOnly() || this.sheetActionPending || this.runtime().model().sheets.length <= 1) return;
+    this.hideContextMenu();
+    this.hideFilterMenu();
+    this.sheetDeleteConfirmation.show(anchor, {
+      title: '删除工作表？',
+      description: sheetName,
+      onConfirm: () => void this.runSheetUiAction(async () => {
+        if (this.isReadOnly() || this.runtime().model().sheets.length <= 1) return;
+        await this.deleteSheet(sheetName);
+      }),
+    });
+  }
+
   private renderTabs(): void {
     if (this.options.showSheetTabs === false || !this.runtimeValue) return;
+    this.sheetDeleteConfirmation.hide(false);
     this.sheetTabs.replaceChildren();
+    this.sheetTabs.setAttribute('role', 'group');
+    this.sheetTabs.setAttribute('aria-label', '工作表');
     Object.assign(this.sheetTabs.style, {
       position: 'absolute',
       left: '0',
@@ -1551,21 +1905,24 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       overflowY: 'hidden',
     });
     for (const sheet of this.runtimeValue.model().sheets) {
+      const active = sheet.name === this.runtimeValue.activeSheetName();
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = sheet.name;
-      button.dataset.active = String(sheet.name === this.runtimeValue.activeSheetName());
+      button.setAttribute('aria-pressed', String(active));
+      button.disabled = this.sheetActionPending;
+      button.dataset.active = String(active);
       Object.assign(button.style, {
         height: '32px',
         minWidth: '64px',
         padding: '0 14px',
         border: '0',
-        borderTop: sheet.name === this.runtimeValue.activeSheetName() ? '2px solid #2563eb' : '2px solid transparent',
-        borderRadius: '3px 3px 0 0',
-        background: sheet.name === this.runtimeValue.activeSheetName() ? '#ffffff' : 'transparent',
-        color: sheet.name === this.runtimeValue.activeSheetName() ? '#1d4ed8' : '#475569',
+        borderTop: active ? '2px solid #2563eb' : '2px solid transparent',
+        borderRadius: active && !this.isReadOnly() ? '3px 0 0 0' : '3px 3px 0 0',
+        background: active ? '#ffffff' : 'transparent',
+        color: active ? '#1d4ed8' : '#475569',
         font: '13px Arial, sans-serif',
-        fontWeight: sheet.name === this.runtimeValue.activeSheetName() ? '600' : '400',
+        fontWeight: active ? '600' : '400',
         cursor: 'pointer',
         whiteSpace: 'nowrap',
       });
@@ -1575,8 +1932,46 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       button.addEventListener('mouseleave', () => {
         if (button.dataset.active !== 'true') button.style.background = 'transparent';
       });
-      button.addEventListener('click', () => void this.setActiveSheet(sheet.name));
-      this.sheetTabs.appendChild(button);
+      button.addEventListener('click', () => void this.runSheetUiAction(() => this.setActiveSheet(sheet.name)));
+      const tab = document.createElement('div');
+      Object.assign(tab.style, { display: 'flex', alignItems: 'center', flexShrink: '0' });
+      tab.appendChild(button);
+      if (active && !this.isReadOnly()) {
+        const remove = document.createElement('button');
+        const lastSheet = this.runtimeValue.model().sheets.length <= 1;
+        remove.type = 'button';
+        remove.setAttribute('aria-label', `删除工作表“${sheet.name}”`);
+        remove.title = lastSheet ? '工作簿至少保留一张工作表' : `删除工作表“${sheet.name}”`;
+        remove.disabled = this.sheetActionPending || lastSheet;
+        remove.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 4h12M6 4V2h4v2M3.5 4l.7 10h7.6l.7-10M6.5 7v4M9.5 7v4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        Object.assign(remove.style, {
+          height: '32px', width: '24px', padding: '0', display: 'grid', placeItems: 'center',
+          border: '0', borderTop: button.style.borderTop, background: button.style.background,
+          borderRadius: '0 3px 0 0', color: '#64748b',
+          cursor: remove.disabled ? 'default' : 'pointer', opacity: remove.disabled ? '0.4' : '1',
+        });
+        remove.addEventListener('mouseenter', () => { if (!remove.disabled) remove.style.color = '#dc2626'; });
+        remove.addEventListener('mouseleave', () => { remove.style.color = '#64748b'; });
+        remove.addEventListener('click', () => this.requestSheetDeletion(sheet.name, remove));
+        tab.appendChild(remove);
+      }
+      this.sheetTabs.appendChild(tab);
+    }
+    if (!this.isReadOnly()) {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.setAttribute('aria-label', '新建工作表');
+      add.title = '新建工作表';
+      add.disabled = this.sheetActionPending;
+      add.innerHTML = '<svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+      Object.assign(add.style, {
+        width: '32px', height: '32px', display: 'grid', placeItems: 'center', flexShrink: '0',
+        border: '0', borderRadius: '4px', background: 'transparent', color: '#475569', cursor: 'pointer',
+      });
+      add.addEventListener('mouseenter', () => { add.style.background = '#e2e8f0'; });
+      add.addEventListener('mouseleave', () => { add.style.background = 'transparent'; });
+      add.addEventListener('click', () => void this.runSheetUiAction(() => this.createSheetFromTabs()));
+      this.sheetTabs.appendChild(add);
     }
   }
 
