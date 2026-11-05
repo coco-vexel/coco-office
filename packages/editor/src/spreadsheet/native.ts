@@ -11,6 +11,7 @@ import { freezeStateFromSheet, SpreadsheetViewportManager } from './viewport.js'
 import { SpreadsheetCanvasRenderer } from './canvas-renderer.js';
 import { SpreadsheetEditorRuntime, type SpreadsheetUserTransactionOptions } from './runtime.js';
 import { SpreadsheetLayout } from './layout.js';
+import { loadOfficeFonts, resolveOfficeFontFamily } from '../fonts.js';
 import { SpreadsheetCellEditor } from './editing.js';
 import {
   createColumnSelection,
@@ -42,6 +43,7 @@ import type {
   SpreadsheetFreezeState,
   SpreadsheetRange,
   SpreadsheetRect,
+  SpreadsheetSheetRenderModel,
   SpreadsheetScrollState,
   SpreadsheetViewport,
 } from './types.js';
@@ -536,6 +538,13 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       mode: 'inline',
       readOnly: this.readOnlyValue,
     });
+    // Canvas does not automatically redraw when a web/local font finishes loading.
+    const model = this.runtimeValue.activeSheet();
+    this.selectionState = expandSelectionForMergedRanges(createSelection(1, 1), model);
+    await loadOfficeFonts(model.styles.cellFormats.map((_, index) =>
+      resolveSpreadsheetCellStyle(model.styles, index).font,
+    ));
+    if (this.disposed) return;
     this.host.setAttribute('aria-readonly', String(this.isReadOnly()));
     this.renderTabs();
     this.render();
@@ -619,7 +628,9 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     const rect = this.host.getBoundingClientRect();
     const width = Math.max(1, rect.width);
     const height = Math.max(1, rect.height - (this.options.showSheetTabs === false ? 0 : 40));
-    const layout = new SpreadsheetLayout(runtime.activeSheet());
+    const layout = new SpreadsheetLayout(runtime.activeSheet(), {
+      maximumDigitWidth: measureNormalStyleMaximumDigitWidth(runtime.activeSheet(), this.baseCanvas),
+    });
     const viewportSize = { width: Math.max(1, width - 12), height: Math.max(1, height - 12) };
     const viewport = new SpreadsheetViewportManager(layout, {
       viewportSize,
@@ -658,18 +669,46 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       renderer.renderDashedRange(layout, viewport, reference.range, { stroke: reference.stroke });
     }
     if (this.copiedRange) renderer.renderCopiedRange(layout, viewport, this.copiedRange);
-    this.renderUnsupportedChartNotices(layout, viewport);
+    this.renderDrawingOverlays(layout, viewport);
     this.emitStateIfChanged(runtime.activeSheetName());
     this.updateScrollbars();
   }
 
-  private renderUnsupportedChartNotices(
+  private renderDrawingOverlays(
     layout: SpreadsheetLayout,
     viewport: SpreadsheetViewportManager,
   ): void {
     this.unsupportedObjectLayer.replaceChildren();
     const sheet = this.runtimeValue?.activeSheet().source;
-    if (!sheet || sheet.charts.length === 0) return;
+    if (!sheet) return;
+
+    for (const drawing of sheet.drawings) {
+      for (const anchor of drawing.anchors) {
+        const guide = tianzigeGuideOrientation(anchor);
+        if (!guide) continue;
+        const logicalRect = chartLogicalRect(layout, anchor);
+        if (!logicalRect) continue;
+
+        for (const fragment of chartScreenFragments(logicalRect, viewport)) {
+          const line = document.createElement('div');
+          line.setAttribute('aria-hidden', 'true');
+          Object.assign(line.style, {
+            position: 'absolute',
+            left: `${fragment.x}px`,
+            top: `${fragment.y}px`,
+            width: `${Math.max(1, fragment.width)}px`,
+            height: `${Math.max(1, fragment.height)}px`,
+            boxSizing: 'border-box',
+            pointerEvents: 'none',
+            opacity: '0.72',
+            ...(guide === 'horizontal'
+              ? { borderTop: '1px dashed #4F9185' }
+              : { borderLeft: '1px dashed #4F9185' }),
+          });
+          this.unsupportedObjectLayer.appendChild(line);
+        }
+      }
+    }
 
     for (let chartIndex = 0; chartIndex < sheet.charts.length; chartIndex += 1) {
       const chart = sheet.charts[chartIndex];
@@ -1634,6 +1673,16 @@ function findChartAnchor(
   );
 }
 
+function tianzigeGuideOrientation(
+  anchor: ExcelDrawingAnchorModel,
+): 'horizontal' | 'vertical' | null {
+  if (anchor.object?.kind !== 'shape') return null;
+  const match = anchor.object.name?.match(
+    /^coco-tianzige-(horizontal|vertical)-/,
+  );
+  return (match?.[1] as 'horizontal' | 'vertical' | undefined) ?? null;
+}
+
 function chartLogicalRect(
   layout: SpreadsheetLayout,
   anchor: ExcelDrawingAnchorModel | undefined,
@@ -1643,10 +1692,10 @@ function chartLogicalRect(
   const startRow = markerIndex(anchor.from.row);
   const endColumn = anchor.to ? markerIndex(anchor.to.column) : startColumn + 5;
   const endRow = anchor.to ? markerIndex(anchor.to.row) : startRow + 12;
-  const startX = layout.getColumnX(startColumn) + markerOffset(anchor.from.columnOffset);
-  const startY = layout.getRowY(startRow) + markerOffset(anchor.from.rowOffset);
-  const endX = layout.getColumnX(endColumn) + markerOffset(anchor.to?.columnOffset);
-  const endY = layout.getRowY(endRow) + markerOffset(anchor.to?.rowOffset);
+  const startX = layout.getColumnX(startColumn) + layout.emuToCssPixels(anchor.from.columnOffset);
+  const startY = layout.getRowY(startRow) + layout.emuToCssPixels(anchor.from.rowOffset);
+  const endX = layout.getColumnX(endColumn) + layout.emuToCssPixels(anchor.to?.columnOffset);
+  const endY = layout.getRowY(endRow) + layout.emuToCssPixels(anchor.to?.rowOffset);
   return {
     x: startX,
     y: startY,
@@ -1695,8 +1744,8 @@ function chartAnchorForLogicalRect(
     return {
       column: column - 1,
       row: row - 1,
-      columnOffset: Math.round((x - layout.getColumnX(column)) * 9525),
-      rowOffset: Math.round((y - layout.getRowY(row)) * 9525),
+      columnOffset: layout.cssPixelsToEmu(x - layout.getColumnX(column)),
+      rowOffset: layout.cssPixelsToEmu(y - layout.getRowY(row)),
     };
   };
   const from = marker(rect.x, rect.y);
@@ -1713,17 +1762,29 @@ function markerIndex(value: number | undefined): number {
   return Math.max(1, Math.floor(value ?? 0) + 1);
 }
 
-function markerOffset(value: number | undefined): number {
-  // OOXML drawing offsets are EMUs; 9,525 EMUs equal one CSS pixel at 96 DPI.
-  return Number.isFinite(value) ? (value ?? 0) / 9525 : 0;
-}
-
 function columnNumberFromLetters(letters: string): number {
   let value = 0;
   for (const character of letters.toUpperCase()) {
     value = value * 26 + character.charCodeAt(0) - 64;
   }
   return value;
+}
+
+function measureNormalStyleMaximumDigitWidth(
+  model: SpreadsheetSheetRenderModel,
+  canvas: HTMLCanvasElement,
+): number {
+  const context = canvas.getContext('2d');
+  if (!context) return 7;
+  const normalFormat = model.styles.cellFormats[0] ?? {};
+  const font = model.styles.fonts[normalFormat.fontId ?? 0] ?? {};
+  const family = font.name?.trim() || 'Arial';
+  const familyCss = resolveOfficeFontFamily(family, { families: [] });
+  context.save();
+  context.font = `${font.italic ? 'italic ' : ''}${font.bold ? '600 ' : ''}${font.size ?? 11}pt ${familyCss}, Arial, sans-serif`;
+  const width = Math.max(...Array.from('0123456789', (digit) => context.measureText(digit).width));
+  context.restore();
+  return Number.isFinite(width) && width > 0 ? width : 7;
 }
 
 function autoFillPreviewRangeForHit(

@@ -65,6 +65,10 @@ export interface SpreadsheetSheetRenderModel {
 export interface SpreadsheetLayoutOptions {
   defaultRowHeight?: number;
   defaultColumnWidth?: number;
+  /** WPS desktop maps worksheet points to 1.2 logical screen pixels at 100% zoom. */
+  pointsToCssPixels?: number;
+  /** Maximum 0-9 glyph width of the Normal style font, measured at 96 DPI. */
+  maximumDigitWidth?: number;
   rowHeaderWidth?: number;
   columnHeaderHeight?: number;
   rowCount?: number;

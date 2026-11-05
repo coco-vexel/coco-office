@@ -1,6 +1,7 @@
 import type { PptSceneNode, PptSlideScene } from './scene.js';
 import { PptEditorSession, type PptEditorCommand, type PptEditorSelection } from './session.js';
 import type { PptEditorView } from './view.js';
+import { loadOfficeFonts, resolveOfficeFontFamily } from '../fonts.js';
 
 interface NativePptDragState {
   mode: 'move' | 'resize';
@@ -582,21 +583,10 @@ class NativePptEditorController implements NativePptEditor {
   private scheduleFontRenderRefresh(fontLinksReady: Promise<void>): Promise<void> {
     if (typeof document === 'undefined' || !document.fonts) return Promise.resolve();
     return fontLinksReady
-      .then(() =>
-        Promise.all(
-          [...new Set(this.fontResources.map((font) => font.family))].map((family) =>
-            document.fonts.load(`16px ${cssFontFamilyStack(family)}`),
-          ),
-        ),
-      )
-      .then(() =>
-        Promise.all(
-          this.referencedFontFamilies.map((family) =>
-            document.fonts.load(`16px ${cssFontFamilyStack(family)}`),
-          ),
-        ),
-      )
-      .then(() => document.fonts.ready)
+      .then(() => loadOfficeFonts(
+        [...this.fontResources.map((font) => font.family), ...this.referencedFontFamilies]
+          .map((family) => `16px ${cssFontFamilyStack(family)}`),
+      ))
       .then(() => {
         this.render();
       })
@@ -2471,9 +2461,10 @@ function googleFontCssUrl(family: string): string | undefined {
 }
 
 function cssFontFamilyStack(family: string): string {
-  return [cssString(family), '"Calibri"', '"Microsoft YaHei"', '"Segoe UI"', 'sans-serif'].join(
-    ', ',
-  );
+  return resolveOfficeFontFamily(family, {
+    families: ['Calibri', 'Microsoft YaHei', 'Segoe UI'],
+    generic: 'sans-serif',
+  });
 }
 
 function cssString(value: string): string {

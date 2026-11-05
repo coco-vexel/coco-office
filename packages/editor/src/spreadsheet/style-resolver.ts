@@ -1,5 +1,6 @@
 import type { ExcelBorderModel, ExcelCellFormatModel, ExcelStylesModel } from '@coco-vexel/coco-office/excel';
 import { getRenderCell } from './render-model.js';
+import { resolveOfficeFontFamily } from '../fonts.js';
 import type { SpreadsheetRange, SpreadsheetRenderCell, SpreadsheetSheetRenderModel } from './types.js';
 
 export interface SpreadsheetResolvedCellStyle {
@@ -73,13 +74,10 @@ function canvasFont(
   const parts = [];
   if (italic) parts.push('italic');
   if (bold) parts.push('600');
-  parts.push(`${size}px`);
-  parts.push(quoteFontFamily(family));
+  // Spreadsheet font sizes are stored in points, not CSS pixels.
+  parts.push(`${size}pt`);
+  parts.push(resolveOfficeFontFamily(family, { families: [] }));
   return parts.join(' ');
-}
-
-function quoteFontFamily(family: string): string {
-  return /\s/.test(family) ? JSON.stringify(family) : family;
 }
 
 function resolveHorizontalAlign(format: ExcelCellFormatModel, cell: SpreadsheetRenderCell | undefined): CanvasTextAlign {

@@ -10,14 +10,16 @@ const fixturePath = fileURLToPath(
 );
 
 describe('spreadsheet xlsx fixture regression', () => {
-  test('keeps source row metadata and renders Excel points as CSS pixels', async () => {
+  test('keeps source row metadata and renders WPS-compatible logical pixels', async () => {
     const workbook = await ExcelWorkbook.fromZip(await readFile(fixturePath), { mode: 'inline' });
     const runtime = await SpreadsheetEditorRuntime.fromWorkbook(workbook);
+    // This fixture opens on its second sheet; the row-height assertions belong to Sheet1.
+    await runtime.setActiveSheet('Sheet1');
     const sheet = runtime.activeSheet();
     const layout = new SpreadsheetLayout(sheet);
 
     expect(sheet.rowMetaByIndex.get(11)?.height).toBe(15.75);
-    expect(layout.getRowHeight(11)).toBeCloseTo(21);
+    expect(layout.getRowHeight(11)).toBeCloseTo(18.9);
     expect(sheet.cellsByAddress.get('A1')?.displayText).toBe('__COCO_EXCEL_UNSAVED_1785722092803__');
   });
 

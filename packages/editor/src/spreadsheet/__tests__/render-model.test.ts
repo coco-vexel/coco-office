@@ -127,6 +127,17 @@ describe('spreadsheet render model', () => {
     });
   });
 
+  test('resolves workbook KaiTi through installed macOS Kaiti family names', () => {
+    const styles = makeStyles();
+    styles.fonts.push({ name: 'KaiTi', size: 26 });
+    styles.cellFormats.push({ fontId: 1 });
+    const style = resolveSpreadsheetCellStyle(styles, 1);
+    expect(style.font).toMatch(/^26pt "KaiTi",/);
+    expect(style.font).toContain('STKaiti');
+    expect(style.font).toContain('"Kaiti SC"');
+    expect(style.fontSize).toBe(26);
+  });
+
   test('resolves Excel-like default cell alignment by value type', () => {
     const model = buildSpreadsheetSheetRenderModel(
       {
@@ -199,14 +210,14 @@ describe('spreadsheet layout', () => {
   test('resolves custom sizes and visible ranges', () => {
     const layout = new SpreadsheetLayout(buildSpreadsheetSheetRenderModel(makeSheet(), makeStyles()));
 
-    expect(layout.getRowHeight(2)).toBe(40);
+    expect(layout.getRowHeight(2)).toBe(36);
     expect(layout.getColumnWidth(2)).toBe(120);
     expect(layout.getColumnX(3)).toBe(216);
-    expect(layout.getRowY(3)).toBe(62);
+    expect(layout.getRowY(3)).toBe(58);
     expect(layout.getVisibleRange(0, 0, { width: 220, height: 60 })).toMatchObject({
       startRow: 1,
       startColumn: 1,
-      endRow: 3,
+      endRow: 4,
       endColumn: 4,
     });
   });
