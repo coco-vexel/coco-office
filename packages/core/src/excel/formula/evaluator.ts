@@ -192,7 +192,7 @@ function evaluateCall(
     case 'COUNT':
       return ok(numericValues(values).length, dependencies);
     case 'COUNTA':
-      return ok(flatten(values).filter((value) => value !== null && value !== '').length, dependencies);
+      return ok(flatten(values).filter((value) => value !== null).length, dependencies);
     case 'MIN': {
       const numbers = numericValues(values);
       return numbers.length === 0 ? ok(0, dependencies) : ok(Math.min(...numbers), dependencies);
@@ -414,7 +414,7 @@ function evaluateCall(
       return !matrix ? error('#VALUE!', dependencies) : ok(flatten([matrix]).filter((value) => value === null || value === '').length, dependencies);
     }
     case 'ISBLANK':
-      return values.length === 1 ? ok(values[0] === null || values[0] === '', dependencies) : error('#VALUE!', dependencies);
+      return values.length === 1 ? ok(values[0] === null, dependencies) : error('#VALUE!', dependencies);
     case 'ISNUMBER':
       return values.length === 1 ? ok(typeof values[0] === 'number' && Number.isFinite(values[0]), dependencies) : error('#VALUE!', dependencies);
     case 'ISTEXT':

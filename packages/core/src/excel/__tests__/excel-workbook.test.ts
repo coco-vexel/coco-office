@@ -808,6 +808,42 @@ describe('ExcelWorkbook', () => {
     expect(outputSheet.drawings.toModel()[0]?.anchors[0]?.to).toMatchObject({ row: 9, column: 4 });
   });
 
+  test('structural and style writes retain worksheet print settings in schema order', async () => {
+    const sheetXml = SHEET_XML.replace(
+      '  <dimension ref="A1:D3"/>',
+      '  <sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>\n  <dimension ref="A1:D3"/>\n  <sheetFormatPr defaultRowHeight="15"/>',
+    ).replace('</worksheet>', [
+      '<printOptions horizontalCentered="1"/>',
+      '<pageMargins left="0" right="0" top="0" bottom="0" header="0" footer="0"/>',
+      '<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="1"/>',
+      '<headerFooter><oddHeader>&amp;CPrint title</oddHeader></headerFooter>',
+      '<rowBreaks count="1" manualBreakCount="1"><brk id="21" max="16383" man="1"/></rowBreaks>',
+      '</worksheet>',
+    ].join(''));
+    const workbook = await ExcelWorkbook.fromZip(await makeWorkbook(sheetXml));
+    workbook.worksheets.add('Other');
+    const firstBytes = await workbook.toZip();
+    const reloaded = await ExcelWorkbook.fromZip(firstBytes);
+    reloaded.worksheets.add('Temporary');
+    reloaded.worksheets.deleteItem('Temporary');
+    reloaded.worksheets.getItem('Sheet1').getRange('A1').format.font.setBold(true);
+
+    for (const bytes of [firstBytes, await reloaded.toZip()]) {
+      const zip = await JSZip.loadAsync(bytes);
+      const xml = await zip.file('xl/worksheets/sheet1.xml')!.async('string');
+      expect(xml).toContain('<pageSetUpPr fitToPage="1"/>');
+      expect(xml).toContain('<sheetFormatPr defaultRowHeight="15"/>');
+      expect(xml).toContain('<printOptions horizontalCentered="1"/>');
+      expect(xml).toContain('<pageMargins left="0" right="0" top="0" bottom="0"');
+      expect(xml).toContain('<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="1"/>');
+      expect(xml).toContain('<oddHeader>&amp;CPrint title</oddHeader>');
+      expect(xml).toContain('<rowBreaks count="1" manualBreakCount="1">');
+      expect(xml.indexOf('<sheetPr>')).toBeLessThan(xml.indexOf('<dimension '));
+      expect(xml.indexOf('<sheetFormatPr ')).toBeLessThan(xml.indexOf('<sheetData>'));
+      expect(xml.indexOf('<pageSetup ')).toBeLessThan(xml.indexOf('<drawing '));
+    }
+  });
+
   test('single-cell value edits preserve unrelated workbook, style and worksheet OOXML', async () => {
     const input = await JSZip.loadAsync(await makeWorkbook());
     const workbookXml = WORKBOOK_XML.replace(

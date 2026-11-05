@@ -220,7 +220,7 @@ function parseCell(
     value = rawValue === '1';
     kind = formula ? 'formula' : 'boolean';
   } else if (dataType === 'str') {
-    value = rawValue ?? null;
+    value = rawValue ?? '';
     kind = formula ? 'formula' : 'string';
   } else if (dataType === 'e') {
     value = rawValue ?? null;

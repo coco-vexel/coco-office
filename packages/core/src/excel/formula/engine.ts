@@ -1,4 +1,5 @@
 import type { ExcelCellModel, ExcelCellValue, ExcelSheetModel } from '../model.js';
+import { clearExcelCellContent, normalizeExcelCellFormula } from '../cell-content.js';
 import { evaluateSpreadsheetFormulaAst } from './evaluator.js';
 import { parseSpreadsheetFormula } from './parser.js';
 import {
@@ -84,12 +85,13 @@ export class SpreadsheetFormulaEngine {
   }
 
   updateCellFormula(address: string, formula: string | null): Map<string, SpreadsheetFormulaResult> {
+    const expression = normalizeExcelCellFormula(formula);
     const normalized = addressFromKey(normalizeAddressKey(address));
     const affected = new Set([
       ...this.getAffectedFormulaAddresses([normalized]),
       normalized,
     ]);
-    this.setCellFormula(normalized, formula);
+    this.setCellFormula(normalized, expression);
     return this.recalculateKnownAffected(affected);
   }
 
@@ -270,7 +272,7 @@ export class SpreadsheetFormulaEngine {
 
   private setCellValue(address: string, value: ExcelCellValue): void {
     if (value === null) {
-      this.deleteCell(address);
+      clearExcelCellContent(this.sheet, this.cellsByAddress, address);
       return;
     }
     const cell = this.ensureCell(address);
@@ -285,12 +287,12 @@ export class SpreadsheetFormulaEngine {
 
   private setCellFormula(address: string, formula: string | null): void {
     if (formula === null) {
-      this.deleteCell(address);
+      clearExcelCellContent(this.sheet, this.cellsByAddress, address);
       return;
     }
     const cell = this.ensureCell(address);
     cell.kind = 'formula';
-    cell.formula = formula.startsWith('=') ? formula.slice(1) : formula;
+    cell.formula = formula;
     cell.value = null;
     delete cell.rawValue;
     delete cell.dataType;
@@ -312,14 +314,6 @@ export class SpreadsheetFormulaEngine {
     this.sheet.cells.sort((left, right) => left.row - right.row || left.column - right.column);
     this.cellsByAddress.set(address, cell);
     return cell;
-  }
-
-  private deleteCell(address: string): void {
-    const cell = this.cellsByAddress.get(address);
-    if (!cell) return;
-    this.cellsByAddress.delete(address);
-    const index = this.sheet.cells.indexOf(cell);
-    if (index !== -1) this.sheet.cells.splice(index, 1);
   }
 
   private sortAffectedFormulaAddresses(affected: Set<string>): string[] {

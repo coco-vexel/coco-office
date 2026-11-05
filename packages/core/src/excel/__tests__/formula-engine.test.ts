@@ -912,6 +912,62 @@ describe('spreadsheet formula engine', () => {
     expect(updated.get('C1')?.value).toBe(13);
   });
 
+  test.each(['value', 'formula'] as const)('keeps styled blanks when clearing a %s through the formula engine', (method) => {
+    const sheet = makeSheet([
+      { address: 'A1', row: 1, column: 1, kind: 'number', value: 3, styleId: 0, rawValue: '3', dataType: 'n' },
+      { address: 'B1', row: 1, column: 2, kind: 'formula', value: 12, formula: 'A1*4', styleId: 1, rawValue: '12' },
+      { address: 'C1', row: 1, column: 3, kind: 'number', value: 7 },
+      { address: 'D1', row: 1, column: 4, kind: 'formula', value: null, formula: 'SUM(A1:C1)+1' },
+    ]);
+    const engine = new SpreadsheetFormulaEngine(sheet);
+    const clear = (address: string) => method === 'value'
+      ? engine.updateCellValue(address, null) : engine.updateCellFormula(address, null);
+    clear('A1');
+    clear('B1');
+    const results = clear('C1');
+    expect(sheet.cells).toEqual([
+      { address: 'A1', row: 1, column: 1, kind: 'blank', value: null, styleId: 0 },
+      { address: 'B1', row: 1, column: 2, kind: 'blank', value: null, styleId: 1 },
+      { address: 'D1', row: 1, column: 4, kind: 'formula', value: null, formula: 'SUM(A1:C1)+1' },
+    ]);
+    expect(results.get('D1')).toMatchObject({ value: 1, error: null });
+  });
+
+  test('clears an empty formula string without creating a phantom formula or losing styles', () => {
+    const sheet = makeSheet([
+      { address: 'A1', row: 1, column: 1, kind: 'formula', value: 2, formula: '1+1', styleId: 1 },
+      { address: 'B1', row: 1, column: 2, kind: 'formula', value: null, formula: 'A1+1' },
+    ]);
+    const engine = new SpreadsheetFormulaEngine(sheet);
+    expect(() => engine.updateCellFormula('A1', '= ')).toThrow(/empty expression/);
+    expect(engine.calculate().get('B1')?.value).toBe(3);
+    expect(engine.updateCellFormula('A1', '').get('B1')?.value).toBe(1);
+    expect(sheet.cells[0]).toEqual({ address: 'A1', row: 1, column: 1, kind: 'blank', value: null, styleId: 1 });
+  });
+
+  test('distinguishes empty strings, whitespace, zero, and false from truly blank cells', () => {
+    const sheet = makeSheet([
+      { address: 'A1', row: 1, column: 1, kind: 'blank', value: null, styleId: 0 },
+      { address: 'A2', row: 2, column: 1, kind: 'string', value: '' },
+      { address: 'A3', row: 3, column: 1, kind: 'string', value: ' ' },
+      { address: 'A4', row: 4, column: 1, kind: 'number', value: 0 },
+      { address: 'A5', row: 5, column: 1, kind: 'boolean', value: false },
+      { address: 'A6', row: 6, column: 1, kind: 'formula', value: null, formula: '""' },
+      { address: 'B1', row: 1, column: 2, kind: 'formula', value: null, formula: 'ISBLANK(A1)' },
+      { address: 'B2', row: 2, column: 2, kind: 'formula', value: null, formula: 'ISBLANK(A2)' },
+      { address: 'B3', row: 3, column: 2, kind: 'formula', value: null, formula: 'ISBLANK(A6)' },
+      { address: 'B4', row: 4, column: 2, kind: 'formula', value: null, formula: 'COUNTA(A1:A6)' },
+      { address: 'B5', row: 5, column: 2, kind: 'formula', value: null, formula: 'COUNTBLANK(A1:A6)' },
+    ]);
+    const engine = new SpreadsheetFormulaEngine(sheet);
+    const results = engine.calculate();
+    expect(['B1', 'B2', 'B3', 'B4', 'B5'].map((address) => results.get(address)?.value)).toEqual([true, false, false, 5, 3]);
+    const cleared = engine.updateCellValue('A2', null);
+    expect(cleared.get('B2')?.value).toBe(true);
+    expect(cleared.get('B4')?.value).toBe(4);
+    expect(cleared.get('B5')?.value).toBe(3);
+  });
+
   test('clears a formula cell and recalculates downstream formulas against blank value', () => {
     const sheet = makeSheet([
       { address: 'A1', row: 1, column: 1, kind: 'number', value: 3 },

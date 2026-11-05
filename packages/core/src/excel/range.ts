@@ -18,6 +18,7 @@ import type {
   ExcelStylesModel,
 } from './model.js';
 import { normalizeExcelColor } from './color.js';
+import { clearExcelCellContent, normalizeExcelCellFormula } from './cell-content.js';
 import type {
   ExcelMutationRecorder,
   ExcelRangeSetBorderMutation,
@@ -246,10 +247,12 @@ export class ExcelRange {
 
   setFormulas(formulas: (string | null)[][]): void {
     this.assertMatrixShape(formulas, 'ExcelRange.setFormulas');
+    // Validate the complete matrix before changing any cells.
+    const normalized = formulas.map((row) => row.map(normalizeExcelCellFormula));
     for (let r = 0; r < this.ref.rowCount; r++) {
       for (let c = 0; c < this.ref.columnCount; c++) {
         const address = formatCellAddress(this.ref.startRow + r, this.ref.startColumn + c);
-        this.setCellFormula(address, formulas[r]![c]!);
+        this.setCellFormula(address, normalized[r]![c]!);
       }
     }
     normalizeSheetCells(this.sheet);
@@ -504,7 +507,7 @@ export class ExcelRange {
 
   private setCellValue(address: string, value: ExcelCellValue): void {
     if (value === null) {
-      this.deleteCell(address);
+      this.clearCellContent(address);
       return;
     }
     const cell = this.ensureCell(address);
@@ -519,12 +522,12 @@ export class ExcelRange {
 
   private setCellFormula(address: string, formula: string | null): void {
     if (formula === null) {
-      this.deleteCell(address);
+      this.clearCellContent(address);
       return;
     }
     const cell = this.ensureCell(address);
     cell.kind = 'formula';
-    cell.formula = formula.startsWith('=') ? formula.slice(1) : formula;
+    cell.formula = formula;
     cell.value = null;
     delete cell.rawValue;
     delete cell.dataType;
@@ -549,18 +552,7 @@ export class ExcelRange {
   }
 
   private clearCellContent(address: string): void {
-    const cell = this.cellsByAddress.get(address);
-    if (!cell) return;
-    if (cell.styleId === undefined) {
-      this.deleteCell(address);
-      return;
-    }
-    cell.kind = 'blank';
-    cell.value = null;
-    delete cell.formula;
-    delete cell.rawValue;
-    delete cell.dataType;
-    delete cell.sharedStringIndex;
+    clearExcelCellContent(this.sheet, this.cellsByAddress, address);
   }
 
   private ensureRow(index: number) {

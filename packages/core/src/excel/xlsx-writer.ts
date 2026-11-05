@@ -533,7 +533,35 @@ function syncWorksheetPart(pkg: Package, sheet: ExcelSheetModel): void {
   if (!sheet.path) return;
   const part = getPart(pkg, sheet.path);
   if (!part?.xmlDom) return;
+  const previous = part.xmlDom;
   replacePartXml(part, serializeWorksheet(sheet));
+  preserveWorksheetPrintSettings(previous, part.xmlDom!);
+}
+
+// These settings are not editable in the model yet. Keep their original OOXML when
+// a structural/style change requires a full worksheet write instead of a cell patch.
+function preserveWorksheetPrintSettings(previous: Document, next: Document): void {
+  const preserved = new Set([
+    'sheetPr', 'sheetFormatPr', 'printOptions', 'pageMargins', 'pageSetup',
+    'headerFooter', 'rowBreaks', 'colBreaks',
+  ]);
+  const order = [
+    'sheetPr', 'dimension', 'sheetViews', 'sheetFormatPr', 'cols', 'sheetData',
+    'mergeCells', 'conditionalFormatting', 'dataValidations', 'hyperlinks',
+    'printOptions', 'pageMargins', 'pageSetup', 'headerFooter', 'rowBreaks', 'colBreaks',
+    'drawing', 'tableParts',
+  ];
+  const root = next.documentElement;
+  for (const node of Array.from(previous.documentElement.childNodes)) {
+    if (node.nodeType !== 1) continue;
+    const element = node as Element;
+    if (element.namespaceURI !== SS_NS || !preserved.has(element.localName)) continue;
+    const index = order.indexOf(element.localName);
+    const before = Array.from(root.childNodes).find((child) =>
+      child.nodeType === 1 && order.indexOf((child as Element).localName) > index,
+    );
+    root.insertBefore(next.importNode(element, true), before ?? null);
+  }
 }
 
 function serializeWorksheet(sheet: ExcelSheetModel): string {
@@ -753,7 +781,9 @@ function serializeCell(cell: ExcelCellModel): string {
   const formula = cell.formula ? `<f>${xmlText(cell.formula)}</f>` : '';
   if (cell.kind === 'string') {
     attrs.push('t="inlineStr"');
-    return `<c ${attrs.join(' ')}><is><t>${xmlText(String(cell.value ?? ''))}</t></is></c>`;
+    const text = String(cell.value ?? '');
+    const preserveSpace = /^\s|\s$/.test(text) ? ' xml:space="preserve"' : '';
+    return `<c ${attrs.join(' ')}><is><t${preserveSpace}>${xmlText(text)}</t></is></c>`;
   }
   if (cell.kind === 'boolean') {
     attrs.push('t="b"');
