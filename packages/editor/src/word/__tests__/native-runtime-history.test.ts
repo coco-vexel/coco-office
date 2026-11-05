@@ -491,6 +491,7 @@ describe('native runtime history integration', () => {
     const lower = paragraph('VM2', '');
     const right1 = paragraph('VM3', 'Right 1');
     const right2 = paragraph('VM4', 'Right 2');
+    const bordered = paragraph('VM5', 'Bordered');
     editor = renderNativeWordEditor(host, {
       ...viewFixture(),
       blocks: [
@@ -510,8 +511,25 @@ describe('native runtime history integration', () => {
             ] },
           ],
         },
+        {
+          type: 'table',
+          tableId: 'bordered-table',
+          columnWidths: [1800],
+          borders: { top: { val: 'single', color: '000000', size: 8 } },
+          rows: [
+            { cells: [
+              { text: bordered.text, gridSpan: 1, vMerge: null, blocks: [bordered], paragraphs: [bordered] },
+            ] },
+          ],
+        },
       ],
     }, { styleIsolation: 'none' });
+    const renderedTable = host.querySelector<HTMLElement>('coco-word-native-table[data-table-id="vertical-table"]');
+    expect(renderedTable?.classList.contains('shows-auxiliary-gridlines')).toBe(true);
+    expect(renderedTable?.dataset.auxiliaryGridlines).toBe('true');
+    const borderedTable = host.querySelector<HTMLElement>('coco-word-native-table[data-table-id="bordered-table"]');
+    expect(borderedTable?.classList.contains('shows-auxiliary-gridlines')).toBe(false);
+    expect(borderedTable?.dataset.auxiliaryGridlines).toBeUndefined();
     const cell = host.querySelector<HTMLElement>('coco-word-native-table[data-table-id="vertical-table"] td[data-row-index="0"][data-column-index="0"]');
     expect(cell).not.toBeNull();
     cell?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));

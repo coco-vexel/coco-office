@@ -1,7 +1,24 @@
-import { createBinaryPart, createXmlPart, getPart, markDirty, setPart, type Package, type Part } from '@coco-vexel/coco-office/pack';
+import {
+  createBinaryPart,
+  createXmlPart,
+  getPart,
+  markDirty,
+  setPart,
+  type Package,
+  type Part,
+} from '@coco-vexel/coco-office/pack';
 import { buildIndices, W14_NS, W_NS, type PackageIndices } from '@coco-vexel/coco-office/word-view';
+import {
+  writeWordTableBorders,
+  type WordTableBorders,
+  type WordTableBorderStyle,
+} from '@coco-vexel/coco-office/word';
 import type { NativeWordChange } from './native-commands.js';
-import type { NativeWordParagraphNode, NativeWordTableCellNode, NativeWordTableNode } from './native-model.js';
+import type {
+  NativeWordParagraphNode,
+  NativeWordTableCellNode,
+  NativeWordTableNode,
+} from './native-model.js';
 import type { EditorRunFormat } from './model.js';
 
 const XML_NS = 'http://www.w3.org/XML/1998/namespace';
@@ -11,9 +28,12 @@ const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const WP_NS = 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing';
 const PIC_NS = 'http://schemas.openxmlformats.org/drawingml/2006/picture';
 const CONTENT_TYPES_NS = 'http://schemas.openxmlformats.org/package/2006/content-types';
-const COMMENTS_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml';
-const COMMENTS_EXTENDED_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml';
-const COMMENTS_EXTENDED_REL_TYPE = 'http://schemas.microsoft.com/office/2011/relationships/commentsExtended';
+const COMMENTS_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml';
+const COMMENTS_EXTENDED_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml';
+const COMMENTS_EXTENDED_REL_TYPE =
+  'http://schemas.microsoft.com/office/2011/relationships/commentsExtended';
 const W15_NS = 'http://schemas.microsoft.com/office/word/2012/wordml';
 const HYPERLINK_REL_TYPE = `${R_NS}/hyperlink`;
 const RELS_CONTENT_TYPE = 'application/vnd.openxmlformats-package.relationships+xml';
@@ -132,7 +152,13 @@ export type WordOoxmlPatch =
     }
   | {
       kind: 'table-structure';
-      op: 'insert-row' | 'delete-row' | 'insert-column' | 'delete-column' | 'merge-cells' | 'split-cell';
+      op:
+        | 'insert-row'
+        | 'delete-row'
+        | 'insert-column'
+        | 'delete-column'
+        | 'merge-cells'
+        | 'split-cell';
       tableId: string;
       rowIndex: number;
       columnIndex: number;
@@ -190,20 +216,47 @@ export interface WordOoxmlPatchPlan {
 export type ResolvedWordOoxmlPatchTarget =
   | {
       kind: 'paragraph';
-      patch: Extract<WordOoxmlPatch, { kind: 'paragraph-text' | 'paragraph-split' | 'paragraph-merge' | 'paragraph-format' | 'format-revision' | 'hyperlink' | 'revision' }>;
+      patch: Extract<
+        WordOoxmlPatch,
+        {
+          kind:
+            | 'paragraph-text'
+            | 'paragraph-split'
+            | 'paragraph-merge'
+            | 'paragraph-format'
+            | 'format-revision'
+            | 'hyperlink'
+            | 'revision';
+        }
+      >;
       partPath: string;
       paragraph: Element;
     }
   | {
       kind: 'table';
-      patch: Extract<WordOoxmlPatch, { kind: 'table-structure' | 'table-insert' | 'table-cell-format' | 'table-cell-clear' | 'table-cell-replace' | 'table-cell-replace-rich' | 'table-delete' }>;
+      patch: Extract<
+        WordOoxmlPatch,
+        {
+          kind:
+            | 'table-structure'
+            | 'table-insert'
+            | 'table-cell-format'
+            | 'table-cell-clear'
+            | 'table-cell-replace'
+            | 'table-cell-replace-rich'
+            | 'table-delete';
+        }
+      >;
       partPath: string;
       table: Element;
       paragraph?: Element;
     }
   | {
       kind: 'drawing';
-      patch: Extract<WordOoxmlPatch, { kind: 'drawing-delete' | 'drawing-resize' | 'drawing-insert' | 'drawing-revision' }>;
+      patch: Extract<
+        WordOoxmlPatch,
+        { kind: 'drawing-delete' | 'drawing-resize' | 'drawing-insert' | 'drawing-revision' }
+      >;
       partPath: string;
       drawing: Element;
       paragraph: Element | null;
@@ -257,9 +310,17 @@ export function planWordOoxmlPatches(changes: readonly NativeWordChange[]): Word
 
   for (const change of changes) {
     if (change.kind === 'table' && change.revisionAction) continue;
-    if (change.kind === 'table' && change.revisionId && tableResolution.get(change.revisionId) === 'reject') continue;
+    if (
+      change.kind === 'table' &&
+      change.revisionId &&
+      tableResolution.get(change.revisionId) === 'reject'
+    )
+      continue;
     const patch = planWordOoxmlPatch(change, {
-      allowTrackedTable: change.kind === 'table' && !!change.revisionId && tableResolution.get(change.revisionId) === 'accept',
+      allowTrackedTable:
+        change.kind === 'table' &&
+        !!change.revisionId &&
+        tableResolution.get(change.revisionId) === 'accept',
     });
     if (patch) {
       patches.push(patch);
@@ -306,7 +367,12 @@ export function planWordOoxmlPatch(
     };
   }
 
-  if (change.kind === 'format' && change.op === 'run' && change.revisionId && change.revisionKind === 'format') {
+  if (
+    change.kind === 'format' &&
+    change.op === 'run' &&
+    change.revisionId &&
+    change.revisionKind === 'format'
+  ) {
     return {
       kind: 'format-revision',
       op: 'run',
@@ -328,7 +394,11 @@ export function planWordOoxmlPatch(
     };
   }
 
-  if (change.kind === 'format' && (change.op === 'accept' || change.op === 'reject') && change.revisionId) {
+  if (
+    change.kind === 'format' &&
+    (change.op === 'accept' || change.op === 'reject') &&
+    change.revisionId
+  ) {
     return {
       kind: 'format-revision',
       op: change.op,
@@ -359,7 +429,13 @@ export function planWordOoxmlPatch(
     };
   }
 
-  if (change.kind === 'image' && change.op === 'insert' && change.src && change.width && change.height) {
+  if (
+    change.kind === 'image' &&
+    change.op === 'insert' &&
+    change.src &&
+    change.width &&
+    change.height
+  ) {
     return {
       kind: 'drawing-insert',
       paraId: change.paraId,
@@ -371,7 +447,12 @@ export function planWordOoxmlPatch(
     };
   }
 
-  if (change.kind === 'image' && (change.op === 'accept' || change.op === 'reject') && change.revisionId && (change.revisionKind === 'insert' || change.revisionKind === 'delete')) {
+  if (
+    change.kind === 'image' &&
+    (change.op === 'accept' || change.op === 'reject') &&
+    change.revisionId &&
+    (change.revisionKind === 'insert' || change.revisionKind === 'delete')
+  ) {
     return {
       kind: 'drawing-revision',
       op: change.op,
@@ -383,7 +464,12 @@ export function planWordOoxmlPatch(
     };
   }
 
-  if (change.kind === 'block' && change.op === 'split' && change.newParaId && change.offset !== undefined) {
+  if (
+    change.kind === 'block' &&
+    change.op === 'split' &&
+    change.newParaId &&
+    change.offset !== undefined
+  ) {
     return {
       kind: 'paragraph-split',
       paraId: change.paraId,
@@ -402,7 +488,10 @@ export function planWordOoxmlPatch(
   if (change.kind === 'hyperlink') {
     if (change.from >= change.to) return null;
     const hyperlink = change.hyperlink;
-    if (change.op === 'set' && (!hyperlink?.target || !isExternalHyperlinkTarget(hyperlink.target) || hyperlink.anchor)) {
+    if (
+      change.op === 'set' &&
+      (!hyperlink?.target || !isExternalHyperlinkTarget(hyperlink.target) || hyperlink.anchor)
+    ) {
       return null;
     }
     return {
@@ -435,7 +524,12 @@ export function planWordOoxmlPatch(
     };
   }
 
-  if (change.kind === 'table' && change.op === 'insert-table' && change.tableSnapshot && change.anchorParaId) {
+  if (
+    change.kind === 'table' &&
+    change.op === 'insert-table' &&
+    change.tableSnapshot &&
+    change.anchorParaId
+  ) {
     return {
       kind: 'table-insert',
       anchorParaId: change.anchorParaId,
@@ -455,20 +549,39 @@ export function planWordOoxmlPatch(
   }
 
   if (change.kind === 'table' && change.op === 'clear-cell') {
-    return { kind: 'table-cell-clear', tableId: change.tableId, rowIndex: change.rowIndex, columnIndex: change.columnIndex };
+    return {
+      kind: 'table-cell-clear',
+      tableId: change.tableId,
+      rowIndex: change.rowIndex,
+      columnIndex: change.columnIndex,
+    };
   }
 
   if (change.kind === 'table' && change.op === 'replace-cell' && change.text !== undefined) {
-    return { kind: 'table-cell-replace', tableId: change.tableId, rowIndex: change.rowIndex, columnIndex: change.columnIndex, text: change.text };
+    return {
+      kind: 'table-cell-replace',
+      tableId: change.tableId,
+      rowIndex: change.rowIndex,
+      columnIndex: change.columnIndex,
+      text: change.text,
+    };
   }
 
   if (change.kind === 'table' && change.op === 'replace-cell' && change.cellSnapshot) {
     if (tableCellSnapshotHasUnsupportedInlineContent(change.cellSnapshot)) return null;
-    return { kind: 'table-cell-replace-rich', tableId: change.tableId, rowIndex: change.rowIndex, columnIndex: change.columnIndex, cell: change.cellSnapshot };
+    return {
+      kind: 'table-cell-replace-rich',
+      tableId: change.tableId,
+      rowIndex: change.rowIndex,
+      columnIndex: change.columnIndex,
+      cell: change.cellSnapshot,
+    };
   }
 
-
-  if (change.kind === 'annotation' && (change.op === 'insert' || change.op === 'delete' || change.op === 'update')) {
+  if (
+    change.kind === 'annotation' &&
+    (change.op === 'insert' || change.op === 'delete' || change.op === 'update')
+  ) {
     return {
       kind: 'comment',
       op: change.op,
@@ -493,7 +606,11 @@ export function planWordOoxmlPatch(
     };
   }
 
-  if (change.kind === 'table' && change.op === 'delete-table' && options.allowTrackedTable === true) {
+  if (
+    change.kind === 'table' &&
+    change.op === 'delete-table' &&
+    options.allowTrackedTable === true
+  ) {
     return { kind: 'table-delete', tableId: change.tableId };
   }
 
@@ -509,11 +626,17 @@ export function resolveWordOoxmlPatchTargets(
   const unresolved: UnresolvedWordOoxmlPatchTarget[] = [];
 
   for (const patch of patches) {
-    if (patch.kind === 'drawing-delete' || patch.kind === 'drawing-resize' || patch.kind === 'drawing-revision') {
+    if (
+      patch.kind === 'drawing-delete' ||
+      patch.kind === 'drawing-resize' ||
+      patch.kind === 'drawing-revision'
+    ) {
       let drawing = indices.drawingIdx.get(patch.drawingId);
       if (!drawing && patch.kind === 'drawing-revision') {
         const paragraph = indices.paraIdx.get(patch.paraId.toUpperCase());
-        drawing = paragraph ? findDrawingAtParagraphOffset(paragraph, patch.offset) ?? undefined : undefined;
+        drawing = paragraph
+          ? (findDrawingAtParagraphOffset(paragraph, patch.offset) ?? undefined)
+          : undefined;
       }
       if (!drawing) {
         unresolved.push({ patch, reason: `drawing not found: ${patch.drawingId}` });
@@ -579,7 +702,14 @@ export function resolveWordOoxmlPatchTargets(
       continue;
     }
 
-    if (patch.kind === 'table-structure' || patch.kind === 'table-cell-format' || patch.kind === 'table-cell-clear' || patch.kind === 'table-cell-replace' || patch.kind === 'table-cell-replace-rich' || patch.kind === 'table-delete') {
+    if (
+      patch.kind === 'table-structure' ||
+      patch.kind === 'table-cell-format' ||
+      patch.kind === 'table-cell-clear' ||
+      patch.kind === 'table-cell-replace' ||
+      patch.kind === 'table-cell-replace-rich' ||
+      patch.kind === 'table-delete'
+    ) {
       const table = indices.tblIdx.get(patch.tableId);
       if (!table) {
         unresolved.push({ patch, reason: `table not found: ${patch.tableId}` });
@@ -634,7 +764,16 @@ export function applyWordOoxmlPatches(
     }
     const target = resolution.resolved[0];
     if (!target) continue;
-    const part = partForNode(pkg, target.kind === 'paragraph' ? target.paragraph : target.kind === 'drawing' ? target.drawing : target.kind === 'table' ? target.table : target.paragraph);
+    const part = partForNode(
+      pkg,
+      target.kind === 'paragraph'
+        ? target.paragraph
+        : target.kind === 'drawing'
+          ? target.drawing
+          : target.kind === 'table'
+            ? target.table
+            : target.paragraph,
+    );
     if (!part) {
       skipped.push({ patch: target.patch, reason: `part not found: ${target.partPath}` });
       continue;
@@ -642,7 +781,12 @@ export function applyWordOoxmlPatches(
 
     if (target.kind === 'drawing') {
       if (target.patch.kind === 'drawing-insert') {
-        const inserted = insertDrawingIntoParagraph(pkg, target.partPath, target.paragraph ?? target.drawing, target.patch);
+        const inserted = insertDrawingIntoParagraph(
+          pkg,
+          target.partPath,
+          target.paragraph ?? target.drawing,
+          target.patch,
+        );
         if (!inserted.ok) {
           skipped.push({ patch: target.patch, reason: inserted.reason });
           continue;
@@ -682,7 +826,12 @@ export function applyWordOoxmlPatches(
 
     if (target.kind === 'table') {
       if (target.patch.kind === 'table-insert') {
-        const inserted = createNativeTableElement(target.table.ownerDocument, target.patch.table, pkg, target.partPath);
+        const inserted = createNativeTableElement(
+          target.table.ownerDocument,
+          target.patch.table,
+          pkg,
+          target.partPath,
+        );
         target.table.parentNode?.insertBefore(inserted, target.table.nextSibling);
         markDirty(part);
         applied.push(target.patch);
@@ -779,7 +928,8 @@ export function applyWordOoxmlPatches(
       }
       markDirty(part);
       applied.push(target.patch);
-      if (target.patch.op === 'accept' || target.patch.op === 'reject') resolvedRevisionIds.add(target.patch.revisionId);
+      if (target.patch.op === 'accept' || target.patch.op === 'reject')
+        resolvedRevisionIds.add(target.patch.revisionId);
       currentIndices = buildIndices(pkg);
       continue;
     }
@@ -809,7 +959,11 @@ export function applyWordOoxmlPatches(
     }
 
     if (target.patch.kind === 'paragraph-split') {
-      const split = splitParagraphElement(target.paragraph, target.patch.offset, target.patch.newParaId);
+      const split = splitParagraphElement(
+        target.paragraph,
+        target.patch.offset,
+        target.patch.newParaId,
+      );
       if (!split.ok) {
         skipped.push({ patch: target.patch, reason: split.reason });
         continue;
@@ -833,7 +987,12 @@ export function applyWordOoxmlPatches(
     }
 
     if (target.patch.kind === 'hyperlink') {
-      const hyperlink = applyParagraphHyperlinkPatch(pkg, target.partPath, target.paragraph, target.patch);
+      const hyperlink = applyParagraphHyperlinkPatch(
+        pkg,
+        target.partPath,
+        target.paragraph,
+        target.patch,
+      );
       if (!hyperlink.ok) {
         skipped.push({ patch: target.patch, reason: hyperlink.reason });
         continue;
@@ -865,24 +1024,38 @@ function unsupportedReason(change: NativeWordChange): string {
     return 'paragraph split change is missing newParaId or offset';
   }
   if (change.kind === 'hyperlink') {
-    if (change.op === 'set' && change.hyperlink?.anchor) return 'hyperlink anchors are not yet written back';
+    if (change.op === 'set' && change.hyperlink?.anchor)
+      return 'hyperlink anchors are not yet written back';
     return 'only external http/https hyperlinks can be written back';
   }
-  if (change.kind === 'image' && change.op === 'resize') return 'image resize is missing width or height';
-  if (change.kind === 'image' && change.op === 'insert') return 'image insert requires data URL, width, and height';
+  if (change.kind === 'image' && change.op === 'resize')
+    return 'image resize is missing width or height';
+  if (change.kind === 'image' && change.op === 'insert')
+    return 'image insert requires data URL, width, and height';
   if (change.kind === 'table') {
-    if (change.op === 'replace-cell' && change.cellSnapshot && tableCellSnapshotHasUnsupportedInlineContent(change.cellSnapshot)) {
+    if (
+      change.op === 'replace-cell' &&
+      change.cellSnapshot &&
+      tableCellSnapshotHasUnsupportedInlineContent(change.cellSnapshot)
+    ) {
       return 'table cell rich replacement does not yet write back drawings or hyperlink anchors';
     }
-    if (change.revisionId || change.revisionKind) return 'table revision writeback requires an original table structure snapshot';
+    if (change.revisionId || change.revisionKind)
+      return 'table revision writeback requires an original table structure snapshot';
     return 'table structure change is not supported for DOCX writeback';
   }
   return `unsupported native change: ${change.kind}/${'op' in change ? change.op : 'unknown'}`;
 }
 
 function tableCellSnapshotHasUnsupportedInlineContent(cell: NativeWordTableCellNode): boolean {
-  return cell.blocks.some((block) =>
-    block.kind !== 'paragraph' || block.content.some((child) => child.kind === 'drawing' || (child.kind === 'text' && child.hyperlink !== undefined && !child.hyperlink.target)),
+  return cell.blocks.some(
+    (block) =>
+      block.kind !== 'paragraph' ||
+      block.content.some(
+        (child) =>
+          child.kind === 'drawing' ||
+          (child.kind === 'text' && child.hyperlink !== undefined && !child.hyperlink.target),
+      ),
   );
 }
 
@@ -901,12 +1074,18 @@ function applyParagraphHyperlinkPatch(
   paragraph: Element,
   patch: Extract<WordOoxmlPatch, { kind: 'hyperlink' }>,
 ): { ok: true } | { ok: false; reason: string } {
-  const children = directChildren(paragraph).filter((child) => !(child.namespaceURI === W_NS && child.localName === 'pPr'));
+  const children = directChildren(paragraph).filter(
+    (child) => !(child.namespaceURI === W_NS && child.localName === 'pPr'),
+  );
   const totalLength = children.reduce((sum, child) => sum + inlineNodeLength(child), 0);
   if (patch.from < 0 || patch.to > totalLength || patch.from >= patch.to) {
     return { ok: false, reason: `hyperlink range out of range: ${patch.from}:${patch.to}` };
   }
-  if (children.some((child) => child.namespaceURI !== W_NS || !['r', 'hyperlink'].includes(child.localName ?? ''))) {
+  if (
+    children.some(
+      (child) => child.namespaceURI !== W_NS || !['r', 'hyperlink'].includes(child.localName ?? ''),
+    )
+  ) {
     return { ok: false, reason: 'hyperlink patch only supports text runs and existing hyperlinks' };
   }
   if (children.some((child) => inlineNodeContainsObject(child))) {
@@ -953,7 +1132,8 @@ function applyParagraphHyperlinkPatch(
 
   if (patch.op === 'set') {
     const doc = paragraph.ownerDocument;
-    if (!doc || !relationshipId) return { ok: false, reason: 'paragraph has no owner document or relationship' };
+    if (!doc || !relationshipId)
+      return { ok: false, reason: 'paragraph has no owner document or relationship' };
     const wrapper = doc.createElementNS(W_NS, 'w:hyperlink');
     wrapper.setAttributeNS(R_NS, 'r:id', relationshipId);
     const tooltip = patch.hyperlink?.tooltip?.trim();
@@ -970,11 +1150,19 @@ function applyParagraphHyperlinkPatch(
   return { ok: true };
 }
 
-function insertSelectedHyperlink(nextChildren: Element[], wrapper: Element, patch: Extract<WordOoxmlPatch, { kind: 'hyperlink' }>): void {
+function insertSelectedHyperlink(
+  nextChildren: Element[],
+  wrapper: Element,
+  patch: Extract<WordOoxmlPatch, { kind: 'hyperlink' }>,
+): void {
   insertSelectedNodes(nextChildren, [wrapper], patch);
 }
 
-function insertSelectedNodes(nextChildren: Element[], selected: Element[], patch: Extract<WordOoxmlPatch, { kind: 'hyperlink' }>): void {
+function insertSelectedNodes(
+  nextChildren: Element[],
+  selected: Element[],
+  patch: Extract<WordOoxmlPatch, { kind: 'hyperlink' }>,
+): void {
   // Rebuild once so the selected content lands at its original logical offset.
   let cursor = 0;
   let inserted = false;
@@ -1000,20 +1188,36 @@ function sliceInlineElement(element: Element, from: number, to: number): Element
 
 function unwrapHyperlinkSlice(element: Element): Element[] {
   if (!(element.namespaceURI === W_NS && element.localName === 'hyperlink')) return [element];
-  return directChildren(element).filter((child) => child.namespaceURI === W_NS && child.localName === 'r');
+  return directChildren(element).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'r',
+  );
 }
 
 function inlineNodeContainsObject(element: Element): boolean {
-  return element.getElementsByTagNameNS(W_NS, 'drawing').length > 0 || element.getElementsByTagNameNS(W_NS, 'pict').length > 0;
+  return (
+    element.getElementsByTagNameNS(W_NS, 'drawing').length > 0 ||
+    element.getElementsByTagNameNS(W_NS, 'pict').length > 0
+  );
 }
 
-function ensureExternalHyperlinkRelationship(pkg: Package, partPath: string, target: string): { id: string; part: Part } {
+function ensureExternalHyperlinkRelationship(
+  pkg: Package,
+  partPath: string,
+  target: string,
+): { id: string; part: Part } {
   const relsPath = relsPathFor(partPath);
   let part = pkg.parts.get(relsPath);
   if (!part?.xmlDom) {
-    const sourceDocument = Array.from(pkg.parts.values()).find((candidate) => candidate.xmlDom)?.xmlDom;
-    if (!sourceDocument) throw new Error('cannot create hyperlink relationships without an XML part');
-    const dom = sourceDocument.implementation?.createDocument(PACKAGE_RELS_NS, 'Relationships', null) as unknown as Document;
+    const sourceDocument = Array.from(pkg.parts.values()).find(
+      (candidate) => candidate.xmlDom,
+    )?.xmlDom;
+    if (!sourceDocument)
+      throw new Error('cannot create hyperlink relationships without an XML part');
+    const dom = sourceDocument.implementation?.createDocument(
+      PACKAGE_RELS_NS,
+      'Relationships',
+      null,
+    ) as unknown as Document;
     if (!dom) throw new Error('XML implementation cannot create relationship document');
     part = createXmlPart({ path: relsPath, contentType: RELS_CONTENT_TYPE, xmlDom: dom });
     setPart(pkg, part);
@@ -1023,7 +1227,10 @@ function ensureExternalHyperlinkRelationship(pkg: Package, partPath: string, tar
   const relationships = relsDom.getElementsByTagNameNS(PACKAGE_RELS_NS, 'Relationship');
   for (let index = 0; index < relationships.length; index += 1) {
     const relationship = relationships[index];
-    if (relationship?.getAttribute('Type') === HYPERLINK_REL_TYPE && relationship.getAttribute('Target') === target) {
+    if (
+      relationship?.getAttribute('Type') === HYPERLINK_REL_TYPE &&
+      relationship.getAttribute('Target') === target
+    ) {
       return { id: relationship.getAttribute('Id') ?? '', part };
     }
   }
@@ -1050,7 +1257,12 @@ function relsPathFor(partPath: string): string {
   return dir ? `${dir}/_rels/${file}.rels` : `_rels/${file}.rels`;
 }
 
-function createNativeTableElement(document: Document, table: NativeWordTableNode, pkg: Package, partPath: string): Element {
+function createNativeTableElement(
+  document: Document,
+  table: NativeWordTableNode,
+  pkg: Package,
+  partPath: string,
+): Element {
   const create = (name: string): Element => document.createElementNS(W_NS, `w:${name}`);
   const tableElement = create('tbl');
   const properties = create('tblPr');
@@ -1058,15 +1270,16 @@ function createNativeTableElement(document: Document, table: NativeWordTableNode
   width.setAttributeNS(W_NS, 'w:w', String(Math.max(0, Math.round(table.layout?.width ?? 0))));
   width.setAttributeNS(W_NS, 'w:type', table.layout?.widthType === 'pct' ? 'pct' : 'dxa');
   properties.appendChild(width);
-  const borders = create('tblBorders');
+  const borders: WordTableBorders = {};
   for (const edge of ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'] as const) {
-    const border = create(edge);
-    border.setAttributeNS(W_NS, 'w:val', 'single');
-    border.setAttributeNS(W_NS, 'w:sz', '4');
-    border.setAttributeNS(W_NS, 'w:color', table.borders?.[edge as keyof NonNullable<NativeWordTableNode['borders']>]?.color ?? 'D9D9D9');
-    borders.appendChild(border);
+    const source = table.borders?.[edge];
+    borders[edge] = {
+      val: (source?.val ?? 'single') as WordTableBorderStyle,
+      color: source?.color ?? 'D9D9D9',
+      size: source?.size ?? 4,
+    };
   }
-  properties.appendChild(borders);
+  writeWordTableBorders(properties, 'table', borders);
   tableElement.appendChild(properties);
   const grid = create('tblGrid');
   for (const columnWidth of table.columnWidths) {
@@ -1085,7 +1298,12 @@ function createNativeTableElement(document: Document, table: NativeWordTableNode
   return tableElement;
 }
 
-function createNativeTableCellElement(document: Document, cell: NativeWordTableCellNode, pkg: Package, partPath: string): Element {
+function createNativeTableCellElement(
+  document: Document,
+  cell: NativeWordTableCellNode,
+  pkg: Package,
+  partPath: string,
+): Element {
   const create = (name: string): Element => document.createElementNS(W_NS, `w:${name}`);
   const cellElement = create('tc');
   const properties = create('tcPr');
@@ -1105,7 +1323,9 @@ function createNativeTableCellElement(document: Document, cell: NativeWordTableC
     properties.appendChild(alignment);
   }
   cellElement.appendChild(properties);
-  const paragraphs = cell.blocks.filter((block): block is NativeWordParagraphNode => block.kind === 'paragraph');
+  const paragraphs = cell.blocks.filter(
+    (block): block is NativeWordParagraphNode => block.kind === 'paragraph',
+  );
   const paragraphNodes = paragraphs.length > 0 ? paragraphs : [null];
   for (const block of paragraphNodes) {
     const paragraph = create('p');
@@ -1114,8 +1334,22 @@ function createNativeTableCellElement(document: Document, cell: NativeWordTableC
         if (child.kind === 'image') {
           const image = parseImageDataUrl(child.src);
           if (!image) continue;
-          const relationship = ensureImageRelationship(pkg, partPath, image.bytes, image.extension, image.contentType);
-          paragraph.appendChild(createInlinePicture(document, relationship.id, child.drawingId, child.width ?? 96, child.height ?? 96));
+          const relationship = ensureImageRelationship(
+            pkg,
+            partPath,
+            image.bytes,
+            image.extension,
+            image.contentType,
+          );
+          paragraph.appendChild(
+            createInlinePicture(
+              document,
+              relationship.id,
+              child.drawingId,
+              child.width ?? 96,
+              child.height ?? 96,
+            ),
+          );
           markDirty(relationship.part);
           markDirty(relationship.mediaPart);
           markContentTypeDirty(pkg, image.extension, image.contentType);
@@ -1145,7 +1379,8 @@ function createNativeTableCellElement(document: Document, cell: NativeWordTableC
           }
           if (child.format.fontFamily) {
             const fonts = create('rFonts');
-            for (const attribute of ['ascii', 'hAnsi', 'eastAsia']) fonts.setAttributeNS(W_NS, `w:${attribute}`, child.format.fontFamily);
+            for (const attribute of ['ascii', 'hAnsi', 'eastAsia'])
+              fonts.setAttributeNS(W_NS, `w:${attribute}`, child.format.fontFamily);
             runProperties.appendChild(fonts);
           }
           if (runProperties.childNodes.length > 0) run.appendChild(runProperties);
@@ -1153,17 +1388,21 @@ function createNativeTableCellElement(document: Document, cell: NativeWordTableC
         const text = create('t');
         text.textContent = child.text;
         if (/^\s|\s$/.test(child.text)) text.setAttributeNS(XML_NS, 'xml:space', 'preserve');
-         run.appendChild(text);
-         if (child.hyperlink?.target) {
-           const relationship = ensureExternalHyperlinkRelationship(pkg, partPath, child.hyperlink.target);
-           const hyperlink = document.createElementNS(W_NS, 'w:hyperlink');
-           hyperlink.setAttributeNS(R_NS, 'r:id', relationship.id);
-           hyperlink.appendChild(run);
-           paragraph.appendChild(hyperlink);
-           markDirty(relationship.part);
-         } else {
-           paragraph.appendChild(run);
-         }
+        run.appendChild(text);
+        if (child.hyperlink?.target) {
+          const relationship = ensureExternalHyperlinkRelationship(
+            pkg,
+            partPath,
+            child.hyperlink.target,
+          );
+          const hyperlink = document.createElementNS(W_NS, 'w:hyperlink');
+          hyperlink.setAttributeNS(R_NS, 'r:id', relationship.id);
+          hyperlink.appendChild(run);
+          paragraph.appendChild(hyperlink);
+          markDirty(relationship.part);
+        } else {
+          paragraph.appendChild(run);
+        }
       }
     }
     if (!paragraph.firstChild) paragraph.appendChild(create('r'));
@@ -1176,31 +1415,45 @@ function applyTableCellFormatPatch(
   table: Element,
   patch: Extract<WordOoxmlPatch, { kind: 'table-cell-format' }>,
 ): { ok: true } | { ok: false; reason: string } {
-  const rows = directChildren(table).filter((child) => child.namespaceURI === W_NS && child.localName === 'tr');
+  const rows = directChildren(table).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tr',
+  );
   const row = rows[patch.rowIndex];
   if (!row) return { ok: false, reason: `table row out of range: ${patch.rowIndex}` };
-  const cells = directChildren(row).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc');
+  const cells = directChildren(row).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+  );
   const cell = cells[patch.columnIndex];
   if (!cell) return { ok: false, reason: `table column out of range: ${patch.columnIndex}` };
   const document = table.ownerDocument;
-  let properties = directChildren(cell).find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr');
+  let properties = directChildren(cell).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tcPr',
+  );
   if (!properties) {
     properties = document.createElementNS(W_NS, 'w:tcPr');
     cell.insertBefore(properties, cell.firstChild);
   }
   if (patch.format.backgroundColor !== undefined) {
-    const existing = directChildren(properties).find((child) => child.namespaceURI === W_NS && child.localName === 'shd');
+    const existing = directChildren(properties).find(
+      (child) => child.namespaceURI === W_NS && child.localName === 'shd',
+    );
     if (patch.format.backgroundColor === null) {
       if (existing) removeNode(existing);
     } else {
       const shading = existing ?? document.createElementNS(W_NS, 'w:shd');
       shading.setAttributeNS(W_NS, 'w:val', 'clear');
-      shading.setAttributeNS(W_NS, 'w:fill', patch.format.backgroundColor.replace(/^#/, '').toUpperCase());
+      shading.setAttributeNS(
+        W_NS,
+        'w:fill',
+        patch.format.backgroundColor.replace(/^#/, '').toUpperCase(),
+      );
       if (!existing) properties.appendChild(shading);
     }
   }
   if (patch.format.verticalAlignment !== undefined) {
-    const existing = directChildren(properties).find((child) => child.namespaceURI === W_NS && child.localName === 'vAlign');
+    const existing = directChildren(properties).find(
+      (child) => child.namespaceURI === W_NS && child.localName === 'vAlign',
+    );
     if (patch.format.verticalAlignment === null) {
       if (existing) removeNode(existing);
     } else {
@@ -1210,21 +1463,23 @@ function applyTableCellFormatPatch(
     }
   }
   if (patch.format.borderColor !== undefined) {
-    const existing = directChildren(properties).find((child) => child.namespaceURI === W_NS && child.localName === 'tcBorders');
-    const borders = existing ?? document.createElementNS(W_NS, 'w:tcBorders');
-    for (const edge of ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'] as const) {
-      let border = directChildren(borders).find((child) => child.namespaceURI === W_NS && child.localName === edge);
-      if (!border) {
-        border = document.createElementNS(W_NS, `w:${edge}`);
-        borders.appendChild(border);
-      }
-      border.setAttributeNS(W_NS, 'w:val', patch.format.borderColor === null ? 'nil' : 'single');
-      if (patch.format.borderColor !== null) {
-        border.setAttributeNS(W_NS, 'w:sz', '4');
-        border.setAttributeNS(W_NS, 'w:color', patch.format.borderColor.replace(/^#/, '').toUpperCase());
-      }
-    }
-    if (!existing) properties.appendChild(borders);
+    const spec =
+      patch.format.borderColor === null
+        ? { val: 'nil' as const }
+        : {
+            val: 'single' as const,
+            size: 4,
+            color: patch.format.borderColor.replace(/^#/, '').toUpperCase(),
+          };
+    const borders: WordTableBorders = {
+      top: { ...spec },
+      left: { ...spec },
+      bottom: { ...spec },
+      right: { ...spec },
+      insideH: { ...spec },
+      insideV: { ...spec },
+    };
+    writeWordTableBorders(properties, 'cell', borders);
   }
   return { ok: true };
 }
@@ -1233,13 +1488,19 @@ function clearTableCellContent(
   table: Element,
   patch: Extract<WordOoxmlPatch, { kind: 'table-cell-clear' }>,
 ): { ok: true } | { ok: false; reason: string } {
-  const rows = directChildren(table).filter((child) => child.namespaceURI === W_NS && child.localName === 'tr');
+  const rows = directChildren(table).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tr',
+  );
   const row = rows[patch.rowIndex];
   if (!row) return { ok: false, reason: `table row out of range: ${patch.rowIndex}` };
-  const cells = directChildren(row).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc');
+  const cells = directChildren(row).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+  );
   const cell = cells[patch.columnIndex];
   if (!cell) return { ok: false, reason: `table column out of range: ${patch.columnIndex}` };
-  const properties = directChildren(cell).find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr');
+  const properties = directChildren(cell).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tcPr',
+  );
   for (const child of directChildren(cell)) {
     if (child !== properties) removeNode(child);
   }
@@ -1251,19 +1512,31 @@ function replaceTableCellText(
   table: Element,
   patch: Extract<WordOoxmlPatch, { kind: 'table-cell-replace' }>,
 ): { ok: true } | { ok: false; reason: string } {
-  const rows = directChildren(table).filter((child) => child.namespaceURI === W_NS && child.localName === 'tr');
+  const rows = directChildren(table).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tr',
+  );
   const row = rows[patch.rowIndex];
   if (!row) return { ok: false, reason: `table row out of range: ${patch.rowIndex}` };
-  const cells = directChildren(row).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc');
+  const cells = directChildren(row).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+  );
   const cell = cells[patch.columnIndex];
   if (!cell) return { ok: false, reason: `table column out of range: ${patch.columnIndex}` };
-  const properties = directChildren(cell).find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr');
-  const sourceParagraph = directChildren(cell).find((child) => child.namespaceURI === W_NS && child.localName === 'p');
+  const properties = directChildren(cell).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tcPr',
+  );
+  const sourceParagraph = directChildren(cell).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'p',
+  );
   for (const child of directChildren(cell)) {
     if (child !== properties) removeNode(child);
   }
   const paragraph = cell.ownerDocument.createElementNS(W_NS, 'w:p');
-  const pPr = sourceParagraph && directChildren(sourceParagraph).find((child) => child.namespaceURI === W_NS && child.localName === 'pPr');
+  const pPr =
+    sourceParagraph &&
+    directChildren(sourceParagraph).find(
+      (child) => child.namespaceURI === W_NS && child.localName === 'pPr',
+    );
   if (pPr) paragraph.appendChild(pPr.cloneNode(true));
   const run = cell.ownerDocument.createElementNS(W_NS, 'w:r');
   const text = cell.ownerDocument.createElementNS(W_NS, 'w:t');
@@ -1281,10 +1554,14 @@ function replaceTableCellSnapshot(
   table: Element,
   patch: Extract<WordOoxmlPatch, { kind: 'table-cell-replace-rich' }>,
 ): { ok: true } | { ok: false; reason: string } {
-  const rows = directChildren(table).filter((child) => child.namespaceURI === W_NS && child.localName === 'tr');
+  const rows = directChildren(table).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tr',
+  );
   const row = rows[patch.rowIndex];
   if (!row) return { ok: false, reason: `table row out of range: ${patch.rowIndex}` };
-  const cells = directChildren(row).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc');
+  const cells = directChildren(row).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+  );
   const target = cells[patch.columnIndex];
   if (!target) return { ok: false, reason: `table column out of range: ${patch.columnIndex}` };
   const generated = createNativeTableCellElement(table.ownerDocument, patch.cell, pkg, partPath);
@@ -1297,7 +1574,9 @@ function applyTableStructurePatch(
   table: Element,
   patch: Extract<WordOoxmlPatch, { kind: 'table-structure' }>,
 ): { ok: true } | { ok: false; reason: string } {
-  const rows = directChildren(table).filter((child) => child.namespaceURI === W_NS && child.localName === 'tr');
+  const rows = directChildren(table).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tr',
+  );
   if (rows.length === 0) return { ok: false, reason: 'table has no rows' };
   if (patch.op === 'insert-row' || patch.op === 'delete-row') {
     if (patch.rowIndex < 0 || patch.rowIndex >= rows.length + (patch.op === 'insert-row' ? 1 : 0)) {
@@ -1316,19 +1595,35 @@ function applyTableStructurePatch(
 
   const row = rows[patch.rowIndex];
   if (!row) return { ok: false, reason: `table row out of range: ${patch.rowIndex}` };
-  const cells = directChildren(row).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc');
+  const cells = directChildren(row).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+  );
   if (patch.op === 'insert-column' || patch.op === 'delete-column') {
     if (cells.length === 0) return { ok: false, reason: 'table row has no cells' };
-    if (patch.columnIndex < 0 || patch.columnIndex >= cells.length + (patch.op === 'insert-column' ? 1 : 0)) {
+    if (
+      patch.columnIndex < 0 ||
+      patch.columnIndex >= cells.length + (patch.op === 'insert-column' ? 1 : 0)
+    ) {
       return { ok: false, reason: `table column out of range: ${patch.columnIndex}` };
     }
-    const allRows = rows.map((candidate) => directChildren(candidate).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc'));
-    if (allRows.some((candidate) => candidate.length !== cells.length || candidate.some((cell) => cellGridSpan(cell) !== 1 || cellHasVerticalMerge(cell)))) {
+    const allRows = rows.map((candidate) =>
+      directChildren(candidate).filter(
+        (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+      ),
+    );
+    if (
+      allRows.some(
+        (candidate) =>
+          candidate.length !== cells.length ||
+          candidate.some((cell) => cellGridSpan(cell) !== 1 || cellHasVerticalMerge(cell)),
+      )
+    ) {
       return { ok: false, reason: 'table column structure is not a regular non-merged grid' };
     }
     for (const rowCells of allRows) {
       if (patch.op === 'delete-column') {
-        if (rowCells.length <= 1) return { ok: false, reason: 'cannot delete the only table column' };
+        if (rowCells.length <= 1)
+          return { ok: false, reason: 'cannot delete the only table column' };
         removeNode(rowCells[patch.columnIndex]!);
       } else {
         const template = rowCells[Math.min(patch.columnIndex, rowCells.length - 1)]!;
@@ -1343,25 +1638,41 @@ function applyTableStructurePatch(
   if (patch.op === 'merge-cells') {
     if (patch.endRowIndex !== undefined && patch.endRowIndex > patch.rowIndex) {
       if (patch.columnIndex < 0 || patch.endRowIndex >= rows.length) {
-        return { ok: false, reason: `vertical merge row out of range: ${patch.rowIndex}:${patch.endRowIndex}` };
+        return {
+          ok: false,
+          reason: `vertical merge row out of range: ${patch.rowIndex}:${patch.endRowIndex}`,
+        };
       }
-      const selected = rows.slice(patch.rowIndex, patch.endRowIndex + 1).map((candidate) =>
-        directChildren(candidate).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc')[patch.columnIndex],
-      );
-      if (selected.some((cell) => !cell || cellGridSpan(cell) !== 1 || cellHasVerticalMerge(cell))) {
+      const selected = rows
+        .slice(patch.rowIndex, patch.endRowIndex + 1)
+        .map(
+          (candidate) =>
+            directChildren(candidate).filter(
+              (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+            )[patch.columnIndex],
+        );
+      if (
+        selected.some((cell) => !cell || cellGridSpan(cell) !== 1 || cellHasVerticalMerge(cell))
+      ) {
         return { ok: false, reason: 'vertical merge requires a regular non-merged column' };
       }
       setCellVerticalMerge(selected[0]!, 'restart');
       for (const cell of selected.slice(1)) {
         setCellVerticalMerge(cell!, 'continue');
-        const properties = directChildren(cell!).find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr');
+        const properties = directChildren(cell!).find(
+          (child) => child.namespaceURI === W_NS && child.localName === 'tcPr',
+        );
         for (const child of directChildren(cell!)) if (child !== properties) removeNode(child);
         cell!.appendChild(cell!.ownerDocument.createElementNS(W_NS, 'w:p'));
       }
       return { ok: true };
     }
     const endColumnIndex = patch.endColumnIndex ?? patch.columnIndex + 1;
-    if (patch.columnIndex < 0 || endColumnIndex >= cells.length || endColumnIndex <= patch.columnIndex) {
+    if (
+      patch.columnIndex < 0 ||
+      endColumnIndex >= cells.length ||
+      endColumnIndex <= patch.columnIndex
+    ) {
       return { ok: false, reason: `merge start column out of range: ${patch.columnIndex}` };
     }
     if (cells.some((cell) => cellGridSpan(cell) !== 1 || cellHasVerticalMerge(cell))) {
@@ -1379,18 +1690,29 @@ function applyTableStructurePatch(
 
   if (patch.endRowIndex !== undefined && patch.endRowIndex > patch.rowIndex) {
     if (patch.columnIndex < 0 || patch.endRowIndex >= rows.length) {
-      return { ok: false, reason: `vertical split row out of range: ${patch.rowIndex}:${patch.endRowIndex}` };
+      return {
+        ok: false,
+        reason: `vertical split row out of range: ${patch.rowIndex}:${patch.endRowIndex}`,
+      };
     }
-    const selected = rows.slice(patch.rowIndex, patch.endRowIndex + 1).map((candidate) =>
-      directChildren(candidate).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc')[patch.columnIndex],
-    );
-    if (selected.some((candidate, index) => {
-      if (!candidate || cellGridSpan(candidate) !== 1) return true;
-      const merge = directChildren(candidate).find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr')
-        ?.getElementsByTagNameNS(W_NS, 'vMerge')[0];
-      const value = merge?.getAttributeNS(W_NS, 'val');
-      return index === 0 ? value !== 'restart' : value !== 'continue';
-    })) {
+    const selected = rows
+      .slice(patch.rowIndex, patch.endRowIndex + 1)
+      .map(
+        (candidate) =>
+          directChildren(candidate).filter(
+            (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+          )[patch.columnIndex],
+      );
+    if (
+      selected.some((candidate, index) => {
+        if (!candidate || cellGridSpan(candidate) !== 1) return true;
+        const merge = directChildren(candidate)
+          .find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr')
+          ?.getElementsByTagNameNS(W_NS, 'vMerge')[0];
+        const value = merge?.getAttributeNS(W_NS, 'val');
+        return index === 0 ? value !== 'restart' : value !== 'continue';
+      })
+    ) {
       return { ok: false, reason: 'cell is not a vertically merged cell' };
     }
     for (const candidate of selected) removeCellVerticalMerge(candidate!);
@@ -1398,7 +1720,9 @@ function applyTableStructurePatch(
   }
 
   const splitRow = rows[patch.rowIndex]!;
-  const splitCells = directChildren(splitRow).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc');
+  const splitCells = directChildren(splitRow).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+  );
   let logicalColumn = 0;
   const cell = splitCells.find((candidate) => {
     const matches = logicalColumn === patch.columnIndex;
@@ -1406,7 +1730,8 @@ function applyTableStructurePatch(
     return matches;
   });
   if (!cell) return { ok: false, reason: `split column out of range: ${patch.columnIndex}` };
-  if (cellHasVerticalMerge(cell) || cellGridSpan(cell) <= 1) return { ok: false, reason: 'cell is not a horizontally merged cell' };
+  if (cellHasVerticalMerge(cell) || cellGridSpan(cell) <= 1)
+    return { ok: false, reason: 'cell is not a horizontally merged cell' };
   const span = cellGridSpan(cell);
   removeCellGridSpan(cell);
   for (let index = 1; index < span; index += 1) {
@@ -1418,26 +1743,38 @@ function applyTableStructurePatch(
 
 function setCellVerticalMerge(cell: Element, value: 'restart' | 'continue'): void {
   const document = cell.ownerDocument;
-  let properties = directChildren(cell).find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr');
+  let properties = directChildren(cell).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tcPr',
+  );
   if (!properties) {
     properties = document.createElementNS(W_NS, 'w:tcPr');
     cell.insertBefore(properties, cell.firstChild);
   }
-  const merge = directChildren(properties).find((child) => child.namespaceURI === W_NS && child.localName === 'vMerge')
-    ?? document.createElementNS(W_NS, 'w:vMerge');
+  const merge =
+    directChildren(properties).find(
+      (child) => child.namespaceURI === W_NS && child.localName === 'vMerge',
+    ) ?? document.createElementNS(W_NS, 'w:vMerge');
   merge.setAttributeNS(W_NS, 'w:val', value);
   if (!merge.parentNode) properties.appendChild(merge);
 }
 
 function removeCellVerticalMerge(cell: Element): void {
-  const properties = directChildren(cell).find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr');
-  const merge = properties && directChildren(properties).find((child) => child.namespaceURI === W_NS && child.localName === 'vMerge');
+  const properties = directChildren(cell).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tcPr',
+  );
+  const merge =
+    properties &&
+    directChildren(properties).find(
+      (child) => child.namespaceURI === W_NS && child.localName === 'vMerge',
+    );
   if (merge) removeNode(merge);
 }
 
 function blankTableRowElement(template: Element): Element {
   const clone = template.cloneNode(true) as Element;
-  const cells = directChildren(clone).filter((child) => child.namespaceURI === W_NS && child.localName === 'tc');
+  const cells = directChildren(clone).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tc',
+  );
   for (const cell of cells) {
     const blank = blankTableCellElement(cell);
     replaceNode(cell, blank);
@@ -1448,11 +1785,19 @@ function blankTableRowElement(template: Element): Element {
 function blankTableCellElement(template: Element): Element {
   const doc = template.ownerDocument;
   const blank = doc!.createElementNS(W_NS, 'w:tc');
-  const tcPr = directChildren(template).find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr');
+  const tcPr = directChildren(template).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tcPr',
+  );
   if (tcPr) blank.appendChild(tcPr.cloneNode(true));
   const paragraph = doc!.createElementNS(W_NS, 'w:p');
-  const sourceParagraph = directChildren(template).find((child) => child.namespaceURI === W_NS && child.localName === 'p');
-  const pPr = sourceParagraph && directChildren(sourceParagraph).find((child) => child.namespaceURI === W_NS && child.localName === 'pPr');
+  const sourceParagraph = directChildren(template).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'p',
+  );
+  const pPr =
+    sourceParagraph &&
+    directChildren(sourceParagraph).find(
+      (child) => child.namespaceURI === W_NS && child.localName === 'pPr',
+    );
   if (pPr) paragraph.appendChild(pPr.cloneNode(true));
   paragraph.appendChild(doc!.createElementNS(W_NS, 'w:r'));
   blank.appendChild(paragraph);
@@ -1485,7 +1830,9 @@ function cellHasVerticalMerge(cell: Element): boolean {
 
 function setCellGridSpan(cell: Element, span: number): void {
   const tcPr = ensureDirectChild(cell, 'tcPr');
-  let gridSpan = directChildren(tcPr).find((child) => child.namespaceURI === W_NS && child.localName === 'gridSpan');
+  let gridSpan = directChildren(tcPr).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'gridSpan',
+  );
   if (!gridSpan) {
     gridSpan = cell.ownerDocument!.createElementNS(W_NS, 'w:gridSpan');
     tcPr.appendChild(gridSpan);
@@ -1494,23 +1841,39 @@ function setCellGridSpan(cell: Element, span: number): void {
 }
 
 function removeCellGridSpan(cell: Element): void {
-  const tcPr = directChildren(cell).find((child) => child.namespaceURI === W_NS && child.localName === 'tcPr');
-  const gridSpan = tcPr && directChildren(tcPr).find((child) => child.namespaceURI === W_NS && child.localName === 'gridSpan');
+  const tcPr = directChildren(cell).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tcPr',
+  );
+  const gridSpan =
+    tcPr &&
+    directChildren(tcPr).find(
+      (child) => child.namespaceURI === W_NS && child.localName === 'gridSpan',
+    );
   if (gridSpan) removeNode(gridSpan);
 }
 
 function ensureDirectChild(element: Element, localName: string): Element {
-  const existing = directChildren(element).find((child) => child.namespaceURI === W_NS && child.localName === localName);
+  const existing = directChildren(element).find(
+    (child) => child.namespaceURI === W_NS && child.localName === localName,
+  );
   if (existing) return existing;
   const created = element.ownerDocument!.createElementNS(W_NS, `w:${localName}`);
   element.insertBefore(created, element.firstChild);
   return created;
 }
 
-function updateTableGrid(table: Element, operation: 'insert' | 'delete', columnIndex: number): void {
-  const grid = directChildren(table).find((child) => child.namespaceURI === W_NS && child.localName === 'tblGrid');
+function updateTableGrid(
+  table: Element,
+  operation: 'insert' | 'delete',
+  columnIndex: number,
+): void {
+  const grid = directChildren(table).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'tblGrid',
+  );
   if (!grid) return;
-  const columns = directChildren(grid).filter((child) => child.namespaceURI === W_NS && child.localName === 'gridCol');
+  const columns = directChildren(grid).filter(
+    (child) => child.namespaceURI === W_NS && child.localName === 'gridCol',
+  );
   if (operation === 'delete') {
     if (columns.length > 1 && columns[columnIndex]) removeNode(columns[columnIndex]!);
     return;
@@ -1544,7 +1907,12 @@ function applyParagraphTextPatch(
   if (patch.op === 'delete') {
     return replaceParagraphTextRange(paragraph, patch.offset, patch.text.length, '');
   }
-  return replaceParagraphTextRange(paragraph, patch.offset, patch.deletedText?.length ?? 0, patch.text);
+  return replaceParagraphTextRange(
+    paragraph,
+    patch.offset,
+    patch.deletedText?.length ?? 0,
+    patch.text,
+  );
 }
 
 function insertParagraphText(
@@ -1568,7 +1936,10 @@ function insertParagraphText(
   }
   const location = locateTextNode(units, offset, true);
   if (!location) return { ok: false, reason: `insert offset out of range: ${offset}` };
-  if (location.node.localName === 'delText' && location.localOffset === (location.node.textContent?.length ?? 0)) {
+  if (
+    location.node.localName === 'delText' &&
+    location.localOffset === (location.node.textContent?.length ?? 0)
+  ) {
     const wrapper = containingRevisionWrapper(location.node, 'del');
     const paragraphParent = wrapper?.parentNode;
     if (wrapper && paragraphParent === paragraph) {
@@ -1597,7 +1968,9 @@ function replaceParagraphTextRange(
 ): { ok: true } | { ok: false; reason: string } {
   if (length === 0) return insertParagraphText(paragraph, offset, text);
   const units = collectParagraphOffsetUnits(paragraph);
-  const textNodes = units.filter((unit): unit is ParagraphTextOffsetUnit => unit.kind === 'text').map((unit) => unit.node);
+  const textNodes = units
+    .filter((unit): unit is ParagraphTextOffsetUnit => unit.kind === 'text')
+    .map((unit) => unit.node);
   const start = locateTextNode(units, offset, false);
   const end = locateTextNode(units, offset + length, true);
   if (!start || !end) return { ok: false, reason: `text range out of range: ${offset}:${length}` };
@@ -1645,8 +2018,10 @@ function collectParagraphOffsetUnits(paragraph: Element): ParagraphOffsetUnit[] 
 }
 
 function hasFieldMarkup(paragraph: Element): boolean {
-  return paragraph.getElementsByTagNameNS(W_NS, 'fldChar').length > 0 ||
-    paragraph.getElementsByTagNameNS(W_NS, 'instrText').length > 0;
+  return (
+    paragraph.getElementsByTagNameNS(W_NS, 'fldChar').length > 0 ||
+    paragraph.getElementsByTagNameNS(W_NS, 'instrText').length > 0
+  );
 }
 
 function collectTextNodes(paragraph: Element): Element[] {
@@ -1694,7 +2069,8 @@ function findDrawingAtParagraphOffset(paragraph: Element, offset: number): Eleme
   let position = 0;
   const units = collectParagraphOffsetUnits(paragraph);
   for (const unit of units) {
-    if (unit.kind === 'object' && offset >= position && offset <= position + unit.length) return unit.node;
+    if (unit.kind === 'object' && offset >= position && offset <= position + unit.length)
+      return unit.node;
     position += unit.length;
   }
   return null;
@@ -1721,7 +2097,10 @@ function locateTextNode(
   return null;
 }
 
-function nextTextUnit(units: readonly ParagraphOffsetUnit[], fromIndex: number): { node: Element; localOffset: number } | null {
+function nextTextUnit(
+  units: readonly ParagraphOffsetUnit[],
+  fromIndex: number,
+): { node: Element; localOffset: number } | null {
   for (let index = fromIndex + 1; index < units.length; index += 1) {
     const unit = units[index]!;
     if (unit.kind === 'text') return { node: unit.node, localOffset: 0 };
@@ -1729,7 +2108,10 @@ function nextTextUnit(units: readonly ParagraphOffsetUnit[], fromIndex: number):
   return null;
 }
 
-function previousTextUnit(units: readonly ParagraphOffsetUnit[], fromIndex: number): { node: Element; localOffset: number } | null {
+function previousTextUnit(
+  units: readonly ParagraphOffsetUnit[],
+  fromIndex: number,
+): { node: Element; localOffset: number } | null {
   for (let index = fromIndex - 1; index >= 0; index -= 1) {
     const unit = units[index]!;
     if (unit.kind === 'text') return { node: unit.node, localOffset: unit.length };
@@ -1764,14 +2146,19 @@ function splitParagraphElement(
   const doc = paragraph.ownerDocument;
   if (!parent || !doc) return { ok: false, reason: 'paragraph has no parent document' };
 
-  const contentChildren = directChildren(paragraph).filter((child) => !(child.namespaceURI === W_NS && child.localName === 'pPr'));
+  const contentChildren = directChildren(paragraph).filter(
+    (child) => !(child.namespaceURI === W_NS && child.localName === 'pPr'),
+  );
   const totalLength = contentChildren.reduce((sum, child) => sum + inlineNodeLength(child), 0);
-  if (offset < 0 || offset > totalLength) return { ok: false, reason: `split offset out of range: ${offset}` };
+  if (offset < 0 || offset > totalLength)
+    return { ok: false, reason: `split offset out of range: ${offset}` };
 
   const afterChildren = splitParagraphContentChildren(doc, contentChildren, offset);
   const newParagraph = doc.createElementNS(W_NS, 'w:p');
   copyParagraphAttributes(paragraph, newParagraph, newParaId);
-  const pPr = directChildren(paragraph).find((child) => child.namespaceURI === W_NS && child.localName === 'pPr');
+  const pPr = directChildren(paragraph).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'pPr',
+  );
   if (pPr) newParagraph.appendChild(pPr.cloneNode(true));
   for (const child of afterChildren) {
     newParagraph.appendChild(child);
@@ -1780,7 +2167,9 @@ function splitParagraphElement(
   return { ok: true };
 }
 
-function mergeNextParagraphElement(paragraph: Element): { ok: true } | { ok: false; reason: string } {
+function mergeNextParagraphElement(
+  paragraph: Element,
+): { ok: true } | { ok: false; reason: string } {
   const next = nextSiblingParagraph(paragraph);
   if (!next) return { ok: false, reason: 'next paragraph not found for merge' };
   for (const child of directChildren(next)) {
@@ -1791,7 +2180,11 @@ function mergeNextParagraphElement(paragraph: Element): { ok: true } | { ok: fal
   return { ok: true };
 }
 
-function splitParagraphContentChildren(doc: Document, children: Element[], offset: number): Element[] {
+function splitParagraphContentChildren(
+  doc: Document,
+  children: Element[],
+  offset: number,
+): Element[] {
   const after: Element[] = [];
   let position = 0;
   let split = false;
@@ -1827,7 +2220,9 @@ function splitElementTextAt(
   applyTextSlice(beforeClone, 0, offset);
   applyTextSlice(afterClone, offset, inlineNodeLength(element));
   replaceNode(element, beforeClone);
-  return hasTextContent(afterClone) || inlineNodeLength(afterClone) > 0 ? { after: afterClone } : { after: null };
+  return hasTextContent(afterClone) || inlineNodeLength(afterClone) > 0
+    ? { after: afterClone }
+    : { after: null };
 }
 
 function applyTextSlice(element: Element, from: number, to: number): void {
@@ -1903,29 +2298,48 @@ function replaceNode(node: Node, replacement: Node): void {
 function removeDrawing(drawing: Element): void {
   const parent = drawing.parentNode;
   if (!parent) return;
-  if (isElement(parent) && parent.namespaceURI === W_NS && parent.localName === 'r' && isDrawingOnlyRun(parent)) {
+  if (
+    isElement(parent) &&
+    parent.namespaceURI === W_NS &&
+    parent.localName === 'r' &&
+    isDrawingOnlyRun(parent)
+  ) {
     parent.parentNode?.removeChild(parent);
     return;
   }
   parent.removeChild(drawing);
 }
 
-function resizeDrawing(drawing: Element, widthPx: number, heightPx: number): { ok: true } | { ok: false; reason: string } {
+function resizeDrawing(
+  drawing: Element,
+  widthPx: number,
+  heightPx: number,
+): { ok: true } | { ok: false; reason: string } {
   if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
     return { ok: false, reason: 'image size must be positive finite pixels' };
   }
   const widthEmu = Math.round((widthPx / 96) * 914400);
   const heightEmu = Math.round((heightPx / 96) * 914400);
-  const container = directChildren(drawing).find((child) => child.namespaceURI === WP_NS && (child.localName === 'inline' || child.localName === 'anchor'));
+  const container = directChildren(drawing).find(
+    (child) =>
+      child.namespaceURI === WP_NS &&
+      (child.localName === 'inline' || child.localName === 'anchor'),
+  );
   if (!container) return { ok: false, reason: 'drawing has no wp:inline or wp:anchor container' };
-  const extent = directChildren(container).find((child) => child.namespaceURI === WP_NS && child.localName === 'extent');
+  const extent = directChildren(container).find(
+    (child) => child.namespaceURI === WP_NS && child.localName === 'extent',
+  );
   if (!extent) return { ok: false, reason: 'drawing has no wp:extent' };
   extent.setAttribute('cx', String(widthEmu));
   extent.setAttribute('cy', String(heightEmu));
   const transforms = container.getElementsByTagNameNS(A_NS, 'xfrm');
   for (let index = 0; index < transforms.length; index += 1) {
     const transform = transforms[index];
-    const ext = transform && directChildren(transform).find((child) => child.namespaceURI === A_NS && child.localName === 'ext');
+    const ext =
+      transform &&
+      directChildren(transform).find(
+        (child) => child.namespaceURI === A_NS && child.localName === 'ext',
+      );
     if (!ext) continue;
     ext.setAttribute('cx', String(widthEmu));
     ext.setAttribute('cy', String(heightEmu));
@@ -1941,11 +2355,26 @@ function insertDrawingIntoParagraph(
 ): { ok: true } | { ok: false; reason: string } {
   const image = parseImageDataUrl(patch.src);
   if (!image) return { ok: false, reason: 'image insert requires a base64 data:image URL' };
-  const relationship = ensureImageRelationship(pkg, partPath, image.bytes, image.extension, image.contentType);
-  const drawing = createInlinePicture(paragraph.ownerDocument!, relationship.id, patch.drawingId, patch.width, patch.height);
-  const children = directChildren(paragraph).filter((child) => !(child.namespaceURI === W_NS && child.localName === 'pPr'));
+  const relationship = ensureImageRelationship(
+    pkg,
+    partPath,
+    image.bytes,
+    image.extension,
+    image.contentType,
+  );
+  const drawing = createInlinePicture(
+    paragraph.ownerDocument!,
+    relationship.id,
+    patch.drawingId,
+    patch.width,
+    patch.height,
+  );
+  const children = directChildren(paragraph).filter(
+    (child) => !(child.namespaceURI === W_NS && child.localName === 'pPr'),
+  );
   const totalLength = children.reduce((sum, child) => sum + inlineNodeLength(child), 0);
-  if (patch.offset < 0 || patch.offset > totalLength) return { ok: false, reason: `image insert offset out of range: ${patch.offset}` };
+  if (patch.offset < 0 || patch.offset > totalLength)
+    return { ok: false, reason: `image insert offset out of range: ${patch.offset}` };
   const next: Element[] = [];
   let position = 0;
   let inserted = false;
@@ -1955,7 +2384,12 @@ function insertDrawingIntoParagraph(
       next.push(drawing);
       inserted = true;
     }
-    if (!inserted && patch.offset < position + length && child.namespaceURI === W_NS && child.localName === 'r') {
+    if (
+      !inserted &&
+      patch.offset < position + length &&
+      child.namespaceURI === W_NS &&
+      child.localName === 'r'
+    ) {
       const before = sliceInlineElement(child, 0, patch.offset - position);
       const after = sliceInlineElement(child, patch.offset - position, length);
       if (before) next.push(before);
@@ -1976,7 +2410,13 @@ function insertDrawingIntoParagraph(
   return { ok: true };
 }
 
-function createInlinePicture(document: Document, relationshipId: string, drawingId: string, widthPx: number, heightPx: number): Element {
+function createInlinePicture(
+  document: Document,
+  relationshipId: string,
+  drawingId: string,
+  widthPx: number,
+  heightPx: number,
+): Element {
   const widthEmu = Math.round((widthPx / 96) * 914400);
   const heightEmu = Math.round((heightPx / 96) * 914400);
   const run = document.createElementNS(W_NS, 'w:r');
@@ -2031,10 +2471,15 @@ function createInlinePicture(document: Document, relationshipId: string, drawing
   return run;
 }
 
-function parseImageDataUrl(src: string): { bytes: Uint8Array; extension: string; contentType: string } | null {
-  const match = /^data:(image\/(png|jpeg|jpg|gif|bmp|webp));base64,([a-z0-9+/=\s]+)$/i.exec(src.trim());
+function parseImageDataUrl(
+  src: string,
+): { bytes: Uint8Array; extension: string; contentType: string } | null {
+  const match = /^data:(image\/(png|jpeg|jpg|gif|bmp|webp));base64,([a-z0-9+/=\s]+)$/i.exec(
+    src.trim(),
+  );
   if (!match) return null;
-  const contentType = match[1]!.toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1]!.toLowerCase();
+  const contentType =
+    match[1]!.toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1]!.toLowerCase();
   const extension = contentType === 'image/jpeg' ? 'jpeg' : contentType.slice('image/'.length);
   const binary = atob(match[3]!.replace(/\s/g, ''));
   return { bytes: Uint8Array.from(binary, (char) => char.charCodeAt(0)), extension, contentType };
@@ -2050,9 +2495,15 @@ function ensureImageRelationship(
   const relsPath = relsPathFor(partPath);
   let part = pkg.parts.get(relsPath);
   if (!part?.xmlDom) {
-    const sourceDocument = Array.from(pkg.parts.values()).find((candidate) => candidate.xmlDom)?.xmlDom;
+    const sourceDocument = Array.from(pkg.parts.values()).find(
+      (candidate) => candidate.xmlDom,
+    )?.xmlDom;
     if (!sourceDocument) throw new Error('cannot create image relationships without an XML part');
-    const dom = sourceDocument.implementation?.createDocument(PACKAGE_RELS_NS, 'Relationships', null) as unknown as Document;
+    const dom = sourceDocument.implementation?.createDocument(
+      PACKAGE_RELS_NS,
+      'Relationships',
+      null,
+    ) as unknown as Document;
     if (!dom) throw new Error('XML implementation cannot create relationship document');
     part = createXmlPart({ path: relsPath, contentType: RELS_CONTENT_TYPE, xmlDom: dom });
     setPart(pkg, part);
@@ -2084,11 +2535,18 @@ function markContentTypeDirty(pkg: Package, extension: string, contentType: stri
   const part = getPart(pkg, '[Content_Types].xml');
   const dom = part?.xmlDom;
   if (!part || !dom) return;
-  const defaults = dom.getElementsByTagNameNS('http://schemas.openxmlformats.org/package/2006/content-types', 'Default');
+  const defaults = dom.getElementsByTagNameNS(
+    'http://schemas.openxmlformats.org/package/2006/content-types',
+    'Default',
+  );
   for (let index = 0; index < defaults.length; index += 1) {
-    if (defaults[index]?.getAttribute('Extension')?.toLowerCase() === extension.toLowerCase()) return;
+    if (defaults[index]?.getAttribute('Extension')?.toLowerCase() === extension.toLowerCase())
+      return;
   }
-  const created = dom.createElementNS('http://schemas.openxmlformats.org/package/2006/content-types', 'Default');
+  const created = dom.createElementNS(
+    'http://schemas.openxmlformats.org/package/2006/content-types',
+    'Default',
+  );
   created.setAttribute('Extension', extension);
   created.setAttribute('ContentType', contentType);
   dom.documentElement?.appendChild(created);
@@ -2097,7 +2555,8 @@ function markContentTypeDirty(pkg: Package, extension: string, contentType: stri
 
 function hashString(value: string): number {
   let hash = 0;
-  for (let index = 0; index < value.length; index += 1) hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  for (let index = 0; index < value.length; index += 1)
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
   return hash;
 }
 
@@ -2108,12 +2567,17 @@ function applyRevisionPatch(
   if (patch.op === 'accept' || patch.op === 'reject') {
     const localName = patch.revisionKind === 'insert' ? 'ins' : 'del';
     const wrappers = Array.from(paragraph.getElementsByTagNameNS(W_NS, localName));
-    const matched = wrappers.filter((wrapper) => wrapper.getAttributeNS(W_NS, 'id') === patch.revisionId);
-    if (matched.length === 0) return { ok: false, reason: `revision not found: ${patch.revisionId}` };
+    const matched = wrappers.filter(
+      (wrapper) => wrapper.getAttributeNS(W_NS, 'id') === patch.revisionId,
+    );
+    if (matched.length === 0)
+      return { ok: false, reason: `revision not found: ${patch.revisionId}` };
     for (const wrapper of matched) {
       const parent = wrapper.parentNode;
       if (!parent) continue;
-      const keep = (localName === 'ins' && patch.op === 'accept') || (localName === 'del' && patch.op === 'reject');
+      const keep =
+        (localName === 'ins' && patch.op === 'accept') ||
+        (localName === 'del' && patch.op === 'reject');
       if (!keep) {
         parent.removeChild(wrapper);
         continue;
@@ -2130,7 +2594,8 @@ function applyRevisionPatch(
     return { ok: true };
   }
 
-  if (patch.from < 0 || patch.to <= patch.from) return { ok: false, reason: 'revision range is empty or invalid' };
+  if (patch.from < 0 || patch.to <= patch.from)
+    return { ok: false, reason: 'revision range is empty or invalid' };
   let position = 0;
   let selected: Element[] = [];
   let wrapperIndex = -1;
@@ -2151,7 +2616,8 @@ function applyRevisionPatch(
       continue;
     }
     const texts = Array.from(run.getElementsByTagNameNS(W_NS, 't'));
-    if (texts.length !== 1) return { ok: false, reason: 'revision writeback requires runs with one text node' };
+    if (texts.length !== 1)
+      return { ok: false, reason: 'revision writeback requires runs with one text node' };
     const text = texts[0]!.textContent ?? '';
     const runStart = position;
     const runEnd = position + text.length;
@@ -2169,7 +2635,8 @@ function applyRevisionPatch(
     }
     if (localTo < text.length) rebuilt.push(cloneRevisionRun(run, text.slice(localTo)));
   }
-  if (selected.length === 0 || patch.to > position) return { ok: false, reason: `revision range out of range: ${patch.from}:${patch.to}` };
+  if (selected.length === 0 || patch.to > position)
+    return { ok: false, reason: `revision range out of range: ${patch.from}:${patch.to}` };
   const doc = paragraph.ownerDocument;
   if (!doc) return { ok: false, reason: 'revision paragraph has no owner document' };
   const wrapper = doc.createElementNS(W_NS, patch.revisionKind === 'insert' ? 'w:ins' : 'w:del');
@@ -2191,7 +2658,8 @@ function applyParagraphFormatPatch(
   paragraph: Element,
   patch: Extract<WordOoxmlPatch, { kind: 'paragraph-format' }>,
 ): { ok: true } | { ok: false; reason: string } {
-  if (patch.from < 0 || patch.to <= patch.from) return { ok: false, reason: 'format range is empty or invalid' };
+  if (patch.from < 0 || patch.to <= patch.from)
+    return { ok: false, reason: 'format range is empty or invalid' };
   const hasRevisionWrappers =
     paragraph.getElementsByTagNameNS(W_NS, 'ins').length > 0 ||
     paragraph.getElementsByTagNameNS(W_NS, 'del').length > 0;
@@ -2215,20 +2683,26 @@ function applyParagraphFormatPatch(
       applyRunFormat(run, patch.format);
       selected += text.length;
     }
-    if (selected === 0 || patch.to > position) return { ok: false, reason: `format range out of range: ${patch.from}:${patch.to}` };
+    if (selected === 0 || patch.to > position)
+      return { ok: false, reason: `format range out of range: ${patch.from}:${patch.to}` };
     return { ok: true };
   }
   const rebuilt: Node[] = [];
   let position = 0;
   let selected = 0;
   for (const child of Array.from(paragraph.childNodes)) {
-    if (child.nodeType !== 1 || (child as Element).namespaceURI !== W_NS || (child as Element).localName !== 'r') {
+    if (
+      child.nodeType !== 1 ||
+      (child as Element).namespaceURI !== W_NS ||
+      (child as Element).localName !== 'r'
+    ) {
       rebuilt.push(child);
       continue;
     }
     const run = child as Element;
     const texts = Array.from(run.getElementsByTagNameNS(W_NS, 't'));
-    if (texts.length !== 1) return { ok: false, reason: 'format writeback requires runs with one text node' };
+    if (texts.length !== 1)
+      return { ok: false, reason: 'format writeback requires runs with one text node' };
     const text = texts[0]!.textContent ?? '';
     const start = position;
     const end = position + text.length;
@@ -2248,7 +2722,8 @@ function applyParagraphFormatPatch(
     }
     if (localTo < text.length) rebuilt.push(cloneRevisionRun(run, text.slice(localTo)));
   }
-  if (selected === 0 || patch.to > position) return { ok: false, reason: `format range out of range: ${patch.from}:${patch.to}` };
+  if (selected === 0 || patch.to > position)
+    return { ok: false, reason: `format range out of range: ${patch.from}:${patch.to}` };
   while (paragraph.firstChild) paragraph.removeChild(paragraph.firstChild);
   for (const child of rebuilt) paragraph.appendChild(child);
   return { ok: true };
@@ -2260,7 +2735,8 @@ function applyFormatRevisionPatch(
 ): { ok: true } | { ok: false; reason: string } {
   const runs = Array.from(paragraph.getElementsByTagNameNS(W_NS, 'r'));
   if (patch.op === 'run') {
-    if (patch.beforeFormat === undefined) return { ok: false, reason: 'format revision is missing beforeFormat snapshot' };
+    if (patch.beforeFormat === undefined)
+      return { ok: false, reason: 'format revision is missing beforeFormat snapshot' };
     let position = 0;
     let changed = 0;
     for (const run of runs) {
@@ -2269,7 +2745,8 @@ function applyFormatRevisionPatch(
       const end = position + text.length;
       position = end;
       if (end <= patch.from || start >= patch.to) continue;
-      if (patch.from > start || patch.to < end) return { ok: false, reason: 'format revision currently requires whole runs' };
+      if (patch.from > start || patch.to < end)
+        return { ok: false, reason: 'format revision currently requires whole runs' };
       const rPr = ensureDirectRPr(run);
       removeDirectChildren(rPr, 'rPrChange');
       const change = rPr.ownerDocument!.createElementNS(W_NS, 'w:rPrChange');
@@ -2278,21 +2755,31 @@ function applyFormatRevisionPatch(
       change.setAttributeNS(W_NS, 'w:date', new Date().toISOString());
       const oldRun = rPr.ownerDocument!.createElementNS(W_NS, 'w:r');
       applyRunFormat(oldRun, patch.beforeFormat ?? {});
-      const oldRPr = directChildren(oldRun).find((child) => child.namespaceURI === W_NS && child.localName === 'rPr');
+      const oldRPr = directChildren(oldRun).find(
+        (child) => child.namespaceURI === W_NS && child.localName === 'rPr',
+      );
       if (oldRPr) for (const child of Array.from(oldRPr.childNodes)) change.appendChild(child);
       rPr.appendChild(change);
       changed += text.length;
     }
-    if (changed === 0 || patch.to > position) return { ok: false, reason: `format revision range not found: ${patch.from}:${patch.to}` };
+    if (changed === 0 || patch.to > position)
+      return { ok: false, reason: `format revision range not found: ${patch.from}:${patch.to}` };
     return { ok: true };
   }
 
   let changed = 0;
   for (const run of runs) {
-    const rPr = directChildren(run).find((child) => child.namespaceURI === W_NS && child.localName === 'rPr');
-    const change = rPr && directChildren(rPr).find(
-      (child) => child.namespaceURI === W_NS && child.localName === 'rPrChange' && child.getAttributeNS(W_NS, 'id') === patch.revisionId,
+    const rPr = directChildren(run).find(
+      (child) => child.namespaceURI === W_NS && child.localName === 'rPr',
     );
+    const change =
+      rPr &&
+      directChildren(rPr).find(
+        (child) =>
+          child.namespaceURI === W_NS &&
+          child.localName === 'rPrChange' &&
+          child.getAttributeNS(W_NS, 'id') === patch.revisionId,
+      );
     if (!change || !rPr) continue;
     if (patch.op === 'reject') {
       for (const child of Array.from(rPr.childNodes)) {
@@ -2303,7 +2790,9 @@ function applyFormatRevisionPatch(
     rPr.removeChild(change);
     changed += 1;
   }
-  return changed > 0 ? { ok: true } : { ok: false, reason: `format revision not found: ${patch.revisionId}` };
+  return changed > 0
+    ? { ok: true }
+    : { ok: false, reason: `format revision not found: ${patch.revisionId}` };
 }
 
 function wordRunText(run: Element): string {
@@ -2314,7 +2803,9 @@ function wordRunText(run: Element): string {
 }
 
 function ensureDirectRPr(run: Element): Element {
-  const existing = directChildren(run).find((child) => child.namespaceURI === W_NS && child.localName === 'rPr');
+  const existing = directChildren(run).find(
+    (child) => child.namespaceURI === W_NS && child.localName === 'rPr',
+  );
   if (existing) return existing;
   const rPr = run.ownerDocument!.createElementNS(W_NS, 'w:rPr');
   run.insertBefore(rPr, run.firstChild);
@@ -2323,14 +2814,20 @@ function ensureDirectRPr(run: Element): Element {
 
 function applyRunFormat(run: Element, format: Partial<EditorRunFormat>): void {
   const doc = run.ownerDocument!;
-  let rPr = directChildren(run).find((child) => child.namespaceURI === W_NS && child.localName === 'rPr') ?? null;
+  let rPr =
+    directChildren(run).find((child) => child.namespaceURI === W_NS && child.localName === 'rPr') ??
+    null;
   if (!rPr) {
     rPr = doc.createElementNS(W_NS, 'w:rPr');
     run.insertBefore(rPr, run.firstChild);
   }
   const booleanProperties: Array<[keyof EditorRunFormat, string]> = [
-    ['bold', 'b'], ['italic', 'i'], ['strike', 'strike'], ['doubleStrike', 'dstrike'],
-    ['caps', 'caps'], ['smallCaps', 'smallCaps'],
+    ['bold', 'b'],
+    ['italic', 'i'],
+    ['strike', 'strike'],
+    ['doubleStrike', 'dstrike'],
+    ['caps', 'caps'],
+    ['smallCaps', 'smallCaps'],
   ];
   for (const [key, localName] of booleanProperties) {
     if (format[key] === undefined) continue;
@@ -2394,11 +2891,13 @@ function mergeAdjacentRevisionWrappers(nodes: Node[]): void {
     const previousElement = previous as Element;
     const currentElement = current as Element;
     if (
-      previousElement.namespaceURI !== W_NS || currentElement.namespaceURI !== W_NS ||
+      previousElement.namespaceURI !== W_NS ||
+      currentElement.namespaceURI !== W_NS ||
       previousElement.localName !== currentElement.localName ||
       (previousElement.localName !== 'ins' && previousElement.localName !== 'del') ||
       previousElement.getAttributeNS(W_NS, 'id') !== currentElement.getAttributeNS(W_NS, 'id')
-    ) continue;
+    )
+      continue;
     for (const child of Array.from(currentElement.childNodes)) previousElement.appendChild(child);
     nodes.splice(index, 1);
     index -= 1;
@@ -2419,7 +2918,8 @@ function convertRevisionText(run: Element): void {
     const deleted = doc.createElementNS(W_NS, 'w:delText');
     for (let index = 0; index < text.attributes.length; index += 1) {
       const attribute = text.attributes[index];
-      if (attribute) deleted.setAttributeNS(attribute.namespaceURI, attribute.name, attribute.value);
+      if (attribute)
+        deleted.setAttributeNS(attribute.namespaceURI, attribute.name, attribute.value);
     }
     deleted.textContent = text.textContent;
     text.parentNode?.replaceChild(deleted, text);
@@ -2447,14 +2947,20 @@ function applyCommentPatch(
   patch: Extract<WordOoxmlPatch, { kind: 'comment' }>,
 ): { ok: true } | { ok: false; reason: string } {
   if (patch.op === 'insert') {
-    if (patch.from < 0 || patch.to <= patch.from) return { ok: false, reason: 'comment range is empty or invalid' };
-    const totalLength = collectParagraphOffsetUnits(paragraph).reduce((sum, unit) => sum + unit.length, 0);
-    if (patch.to > totalLength) return { ok: false, reason: `comment range out of range: ${patch.from}:${patch.to}` };
+    if (patch.from < 0 || patch.to <= patch.from)
+      return { ok: false, reason: 'comment range is empty or invalid' };
+    const totalLength = collectParagraphOffsetUnits(paragraph).reduce(
+      (sum, unit) => sum + unit.length,
+      0,
+    );
+    if (patch.to > totalLength)
+      return { ok: false, reason: `comment range out of range: ${patch.from}:${patch.to}` };
     ensureCommentsPart(pkg, partPath);
     insertCommentAnchors(paragraph, patch.from, patch.to, patch.commentId);
     const date = new Date().toISOString();
     appendCommentBody(pkg, patch.commentId, patch.body ?? '', 'User', date);
-    if (patch.parentCommentId !== undefined) appendExtendedCommentRelation(pkg, patch.commentId, patch.parentCommentId);
+    if (patch.parentCommentId !== undefined)
+      appendExtendedCommentRelation(pkg, patch.commentId, patch.parentCommentId);
     return { ok: true };
   }
 
@@ -2478,7 +2984,8 @@ function applyCommentPatch(
         comment.appendChild(paragraph);
       } else {
         textNodes[0]!.textContent = patch.body;
-        for (let textIndex = textNodes.length - 1; textIndex >= 1; textIndex -= 1) removeNode(textNodes[textIndex]!);
+        for (let textIndex = textNodes.length - 1; textIndex >= 1; textIndex -= 1)
+          removeNode(textNodes[textIndex]!);
       }
       markDirty(commentsPart);
       return { ok: true };
@@ -2506,9 +3013,17 @@ function ensureCommentsPart(pkg: Package, partPath: string): Part {
   if (!commentsPart?.xmlDom) {
     const sourceDocument = Array.from(pkg.parts.values()).find((part) => part.xmlDom)?.xmlDom;
     if (!sourceDocument) throw new Error('cannot create comments.xml without an XML part');
-    const dom = sourceDocument.implementation?.createDocument(W_NS, 'w:comments', null) as unknown as Document;
+    const dom = sourceDocument.implementation?.createDocument(
+      W_NS,
+      'w:comments',
+      null,
+    ) as unknown as Document;
     if (!dom) throw new Error('XML implementation cannot create comments.xml');
-    commentsPart = createXmlPart({ path: 'word/comments.xml', contentType: COMMENTS_CONTENT_TYPE, xmlDom: dom });
+    commentsPart = createXmlPart({
+      path: 'word/comments.xml',
+      contentType: COMMENTS_CONTENT_TYPE,
+      xmlDom: dom,
+    });
     setPart(pkg, commentsPart);
     ensureCommentsContentType(pkg);
   }
@@ -2555,14 +3070,24 @@ function ensureCommentsRelationship(pkg: Package, partPath: string): void {
   markDirty(relsPart);
 }
 
-function appendCommentBody(pkg: Package, commentId: number, body: string, author: string, date: string): void {
+function appendCommentBody(
+  pkg: Package,
+  commentId: number,
+  body: string,
+  author: string,
+  date: string,
+): void {
   const part = pkg.parts.get('word/comments.xml');
   const dom = part?.xmlDom;
   if (!part || !dom) return;
   const root = dom.documentElement;
   if (!root) return;
-  if (Array.from(dom.getElementsByTagNameNS(W_NS, 'comment'))
-    .some((comment) => comment.getAttributeNS(W_NS, 'id') === String(commentId))) return;
+  if (
+    Array.from(dom.getElementsByTagNameNS(W_NS, 'comment')).some(
+      (comment) => comment.getAttributeNS(W_NS, 'id') === String(commentId),
+    )
+  )
+    return;
   const comment = dom.createElementNS(W_NS, 'w:comment');
   comment.setAttributeNS(W_NS, 'w:id', String(commentId));
   comment.setAttributeNS(W_NS, 'w:author', author);
@@ -2581,7 +3106,11 @@ function appendCommentBody(pkg: Package, commentId: number, body: string, author
   markDirty(part);
 }
 
-function appendExtendedCommentRelation(pkg: Package, commentId: number, parentCommentId: number): void {
+function appendExtendedCommentRelation(
+  pkg: Package,
+  commentId: number,
+  parentCommentId: number,
+): void {
   const commentsPart = pkg.parts.get('word/comments.xml');
   const commentsDom = commentsPart?.xmlDom;
   if (!commentsDom) return;
@@ -2601,8 +3130,9 @@ function appendExtendedCommentRelation(pkg: Package, commentId: number, parentCo
   const dom = part.xmlDom;
   const root = dom?.documentElement;
   if (!dom || !root) return;
-  const existing = Array.from(root.getElementsByTagNameNS(W15_NS, 'commentEx'))
-    .some((entry) => entry.getAttributeNS(W15_NS, 'paraId') === paraId);
+  const existing = Array.from(root.getElementsByTagNameNS(W15_NS, 'commentEx')).some(
+    (entry) => entry.getAttributeNS(W15_NS, 'paraId') === paraId,
+  );
   if (existing) return;
   const relation = dom.createElementNS(W15_NS, 'w15:commentEx');
   relation.setAttributeNS(W15_NS, 'w15:paraId', paraId);
@@ -2625,13 +3155,18 @@ function removeExtendedCommentRelation(pkg: Package, commentId: number): void {
   let paraId: string | null = null;
   for (let index = 0; index < comments.length; index += 1) {
     if (comments[index]?.getAttributeNS(W_NS, 'id') !== String(commentId)) continue;
-    paraId = comments[index]?.getElementsByTagNameNS(W_NS, 'p')[0]?.getAttributeNS(W14_NS, 'paraId') ?? null;
+    paraId =
+      comments[index]?.getElementsByTagNameNS(W_NS, 'p')[0]?.getAttributeNS(W14_NS, 'paraId') ??
+      null;
     break;
   }
   if (!paraId) return;
   const relations = Array.from(extendedDom.getElementsByTagNameNS(W15_NS, 'commentEx'));
   for (const relation of relations) {
-    if (relation.getAttributeNS(W15_NS, 'paraId') === paraId || relation.getAttributeNS(W15_NS, 'paraIdParent') === paraId) {
+    if (
+      relation.getAttributeNS(W15_NS, 'paraId') === paraId ||
+      relation.getAttributeNS(W15_NS, 'paraIdParent') === paraId
+    ) {
       removeNode(relation);
       markDirty(extendedPart);
     }
@@ -2641,17 +3176,31 @@ function removeExtendedCommentRelation(pkg: Package, commentId: number): void {
 function ensureCommentsExtendedPart(pkg: Package, partPath: string): Part {
   let part = pkg.parts.get('word/commentsExtended.xml');
   if (!part?.xmlDom) {
-    const sourceDocument = pkg.parts.get(partPath)?.xmlDom ?? Array.from(pkg.parts.values()).find((candidate) => candidate.xmlDom)?.xmlDom;
+    const sourceDocument =
+      pkg.parts.get(partPath)?.xmlDom ??
+      Array.from(pkg.parts.values()).find((candidate) => candidate.xmlDom)?.xmlDom;
     if (!sourceDocument) throw new Error('cannot create commentsExtended.xml without an XML part');
-    const dom = sourceDocument.implementation?.createDocument(W15_NS, 'w15:commentsEx', null) as unknown as Document;
+    const dom = sourceDocument.implementation?.createDocument(
+      W15_NS,
+      'w15:commentsEx',
+      null,
+    ) as unknown as Document;
     if (!dom) throw new Error('XML implementation cannot create commentsExtended.xml');
-    part = createXmlPart({ path: 'word/commentsExtended.xml', contentType: COMMENTS_EXTENDED_CONTENT_TYPE, xmlDom: dom });
+    part = createXmlPart({
+      path: 'word/commentsExtended.xml',
+      contentType: COMMENTS_EXTENDED_CONTENT_TYPE,
+      xmlDom: dom,
+    });
     setPart(pkg, part);
   }
   const contentTypes = getPart(pkg, '[Content_Types].xml');
   if (contentTypes?.xmlDom) {
     const overrides = contentTypes.xmlDom.getElementsByTagNameNS(CONTENT_TYPES_NS, 'Override');
-    if (!Array.from(overrides).some((entry) => entry.getAttribute('PartName') === '/word/commentsExtended.xml')) {
+    if (
+      !Array.from(overrides).some(
+        (entry) => entry.getAttribute('PartName') === '/word/commentsExtended.xml',
+      )
+    ) {
       const override = contentTypes.xmlDom.createElementNS(CONTENT_TYPES_NS, 'Override');
       override.setAttribute('PartName', '/word/commentsExtended.xml');
       override.setAttribute('ContentType', COMMENTS_EXTENDED_CONTENT_TYPE);
@@ -2661,10 +3210,18 @@ function ensureCommentsExtendedPart(pkg: Package, partPath: string): Part {
   }
   const relsPart = pkg.parts.get(relsPathFor(partPath));
   const relsDom = relsPart?.xmlDom;
-  if (relsDom && !Array.from(relsDom.getElementsByTagNameNS(PACKAGE_RELS_NS, 'Relationship'))
-    .some((entry) => entry.getAttribute('Type') === COMMENTS_EXTENDED_REL_TYPE)) {
+  if (
+    relsDom &&
+    !Array.from(relsDom.getElementsByTagNameNS(PACKAGE_RELS_NS, 'Relationship')).some(
+      (entry) => entry.getAttribute('Type') === COMMENTS_EXTENDED_REL_TYPE,
+    )
+  ) {
     const relationships = relsDom.getElementsByTagNameNS(PACKAGE_RELS_NS, 'Relationship');
-    const used = new Set(Array.from(relationships).map((entry) => entry.getAttribute('Id')).filter(Boolean));
+    const used = new Set(
+      Array.from(relationships)
+        .map((entry) => entry.getAttribute('Id'))
+        .filter(Boolean),
+    );
     let idNumber = 1;
     while (used.has(`rId${idNumber}`)) idNumber += 1;
     const relationship = relsDom.createElementNS(PACKAGE_RELS_NS, 'Relationship');
@@ -2677,7 +3234,12 @@ function ensureCommentsExtendedPart(pkg: Package, partPath: string): Part {
   return part;
 }
 
-function insertCommentAnchors(paragraph: Element, from: number, to: number, commentId: number): void {
+function insertCommentAnchors(
+  paragraph: Element,
+  from: number,
+  to: number,
+  commentId: number,
+): void {
   const document = paragraph.ownerDocument!;
   const start = document.createElementNS(W_NS, 'w:commentRangeStart');
   start.setAttributeNS(W_NS, 'w:id', String(commentId));
@@ -2690,14 +3252,18 @@ function insertCommentAnchors(paragraph: Element, from: number, to: number, comm
   const markers = new Map<number, Element[]>();
   markers.set(from, [start]);
   markers.set(to, [end, referenceRun]);
-  const children = directChildren(paragraph).filter((child) => !(child.namespaceURI === W_NS && child.localName === 'pPr'));
+  const children = directChildren(paragraph).filter(
+    (child) => !(child.namespaceURI === W_NS && child.localName === 'pPr'),
+  );
   const next: Element[] = [];
   let position = 0;
   for (const child of children) {
     const atStartMarkers = markers.get(position);
     if (atStartMarkers) next.push(...atStartMarkers);
     const length = inlineNodeLength(child);
-    const boundaries = [from, to].filter((boundary) => boundary > position && boundary < position + length).sort((a, b) => a - b);
+    const boundaries = [from, to]
+      .filter((boundary) => boundary > position && boundary < position + length)
+      .sort((a, b) => a - b);
     let local = 0;
     for (const boundary of [...boundaries, position + length]) {
       const piece = sliceInlineElement(child, local, boundary - position);
@@ -2733,7 +3299,12 @@ function removeCommentAnchors(pkg: Package, commentId: number): void {
       }
       for (const node of matches) {
         const parent = node.parentNode;
-        if (localName === 'commentReference' && parent?.nodeType === 1 && (parent as Element).namespaceURI === W_NS && (parent as Element).localName === 'r') {
+        if (
+          localName === 'commentReference' &&
+          parent?.nodeType === 1 &&
+          (parent as Element).namespaceURI === W_NS &&
+          (parent as Element).localName === 'r'
+        ) {
           removeNode(parent);
         } else {
           removeNode(node);
@@ -2749,7 +3320,8 @@ function isDrawingOnlyRun(run: Element): boolean {
     const child = run.childNodes[i];
     if (!child || child.nodeType !== 1) continue;
     const el = child as Element;
-    if (el.namespaceURI === W_NS && (el.localName === 'rPr' || el.localName === 'drawing')) continue;
+    if (el.namespaceURI === W_NS && (el.localName === 'rPr' || el.localName === 'drawing'))
+      continue;
     return false;
   }
   return true;

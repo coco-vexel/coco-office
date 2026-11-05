@@ -113,7 +113,14 @@ export {
   type BodyStartParagraphSpec,
   type ParaId,
   type RevisionId,
+  type TableCellDirectFormat,
 } from './plan.js';
+export {
+  writeWordTableBorders,
+  type WordTableBorder,
+  type WordTableBorders,
+  type WordTableBorderStyle,
+} from './table-borders.js';
 export { classifyRange, type RangeClassification } from './range-kind.js';
 export { WordError, type WordErrorCode } from './word-error.js';
 export {

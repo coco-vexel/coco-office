@@ -861,6 +861,11 @@ coco-word-native-table td {
   vertical-align: top;
 }
 
+/* Editor-only gridlines keep borderless OOXML tables legible without changing their document formatting. */
+coco-word-native-table.shows-auxiliary-gridlines > table > tbody > tr > td {
+  border: 1px dashed rgb(148 163 184 / 72%) !important;
+}
+
 coco-word-native-table td coco-word-native-p {
   min-height: 1.2em;
   margin: 0;

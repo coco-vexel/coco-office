@@ -229,6 +229,18 @@ describe('WordPlan builder —— 链式返回 + op push', () => {
     await doc.dispose();
   });
 
+  test('setTableBorders pushes a table border op', async () => {
+    const doc = await makeDoc();
+    const plan = doc.plan();
+    const borders = {
+      top: { val: 'single' as const, color: '000000', size: 4 },
+      insideH: { val: 'dashed' as const, color: 'D1D5DB', size: 4 },
+    };
+    expect(plan.setTableBorders({ tableId: 'tbl-0001', borders })).toBe(plan);
+    expect(plan.ops[0]).toEqual({ type: 'setTableBorders', tableId: 'tbl-0001', borders });
+    await doc.dispose();
+  });
+
   test('addComment:Date → ISO 字符串,未传 date 则字段缺', async () => {
     const doc = await makeDoc();
     const plan = doc.plan();

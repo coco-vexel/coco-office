@@ -52,24 +52,24 @@ interface ParagraphList {
 
 ### `Paragraph`
 
-| API | 说明 |
-|---|---|
-| `paragraph.paraId` / `paragraph.id` | 段落 ID |
-| `paragraph.story` | 段落所在 story |
-| `paragraph.getInfo()` | 读取当前 `ParagraphInfo` 快照 |
-| `paragraph.getText()` | 读取当前段落文本 |
-| `paragraph.replaceWith(text)` | 替换整段文本并立即提交 |
-| `paragraph.setAlignment(value)` | 设置段落水平对齐并立即提交 |
-| `paragraph.setOutlineLevel(level)` | 设置段落大纲级别并立即提交，取值 0-8 |
-| `paragraph.setPageBreakBefore(value)` | 设置或移除段前分页并立即提交 |
-| `paragraph.setIndent(value)` | 设置段落缩进并立即提交，单位 twips |
-| `paragraph.setSpacing(value)` | 设置段落间距并立即提交，单位 twips |
-| `paragraph.insertBefore(text)` | 在当前段落前插入新段落并立即提交 |
-| `paragraph.insertAfter(text)` | 在当前段落后插入新段落并立即提交 |
-| `paragraph.delete(opts?)` | 删除段落并立即提交 |
-| `paragraph.addComment(text, opts?)` | 给整段添加批注；`opts.author` 可指定批注作者 |
-| `paragraph.createBookmark(name)` | 给整段创建书签 |
-| `paragraph.findText(search, opts?)` | 获取段内文字片段对象 |
+| API                                   | 说明                                         |
+| ------------------------------------- | -------------------------------------------- |
+| `paragraph.paraId` / `paragraph.id`   | 段落 ID                                      |
+| `paragraph.story`                     | 段落所在 story                               |
+| `paragraph.getInfo()`                 | 读取当前 `ParagraphInfo` 快照                |
+| `paragraph.getText()`                 | 读取当前段落文本                             |
+| `paragraph.replaceWith(text)`         | 替换整段文本并立即提交                       |
+| `paragraph.setAlignment(value)`       | 设置段落水平对齐并立即提交                   |
+| `paragraph.setOutlineLevel(level)`    | 设置段落大纲级别并立即提交，取值 0-8         |
+| `paragraph.setPageBreakBefore(value)` | 设置或移除段前分页并立即提交                 |
+| `paragraph.setIndent(value)`          | 设置段落缩进并立即提交，单位 twips           |
+| `paragraph.setSpacing(value)`         | 设置段落间距并立即提交，单位 twips           |
+| `paragraph.insertBefore(text)`        | 在当前段落前插入新段落并立即提交             |
+| `paragraph.insertAfter(text)`         | 在当前段落后插入新段落并立即提交             |
+| `paragraph.delete(opts?)`             | 删除段落并立即提交                           |
+| `paragraph.addComment(text, opts?)`   | 给整段添加批注；`opts.author` 可指定批注作者 |
+| `paragraph.createBookmark(name)`      | 给整段创建书签                               |
+| `paragraph.findText(search, opts?)`   | 获取段内文字片段对象                         |
 
 写方法可传 `opts.trackChanges`；批注/修订类操作还可传 `opts.author` 和 `opts.date`：
 
@@ -81,19 +81,19 @@ await paragraph.addComment('修改建议。', { author: 'halvee' });
 
 ### `TextRange`
 
-| API | 说明 |
-|---|---|
-| `text.replaceWith(replacement)` | 替换段内匹配文字 |
-| `text.delete()` | 删除段内匹配文字 |
-| `text.setBold(value)` | 设置匹配文字加粗 |
-| `text.setColor(color)` | 设置匹配文字颜色，使用 `RRGGBB` |
-| `text.setItalic(value)` | 设置匹配文字斜体 |
-| `text.setUnderline(value)` | 设置匹配文字单下划线 |
-| `text.setHighlight(color)` | 设置匹配文字高亮色，例如 `yellow` |
-| `text.setFontSize(points)` | 设置匹配文字字号，单位为 pt |
-| `text.setFontFamily(name)` | 设置匹配文字字体 |
+| API                               | 说明                                             |
+| --------------------------------- | ------------------------------------------------ |
+| `text.replaceWith(replacement)`   | 替换段内匹配文字                                 |
+| `text.delete()`                   | 删除段内匹配文字                                 |
+| `text.setBold(value)`             | 设置匹配文字加粗                                 |
+| `text.setColor(color)`            | 设置匹配文字颜色，使用 `RRGGBB`                  |
+| `text.setItalic(value)`           | 设置匹配文字斜体                                 |
+| `text.setUnderline(value)`        | 设置匹配文字单下划线                             |
+| `text.setHighlight(color)`        | 设置匹配文字高亮色，例如 `yellow`                |
+| `text.setFontSize(points)`        | 设置匹配文字字号，单位为 pt                      |
+| `text.setFontFamily(name)`        | 设置匹配文字字体                                 |
 | `text.addComment(comment, opts?)` | 给匹配文字添加批注；`opts.author` 可指定批注作者 |
-| `text.createBookmark(name)` | 给匹配文字创建书签 |
+| `text.createBookmark(name)`       | 给匹配文字创建书签                               |
 
 `paragraph.findText(search, { scope })` 的 `scope` 默认为 `'first'`，可传 `'all'`。
 
@@ -108,16 +108,16 @@ if (bookmark) {
 }
 ```
 
-| API | 说明 |
-|---|---|
-| `doc.bookmarks.list(opts?)` | 返回可操作的 `Bookmark[]` |
-| `doc.bookmarks.get(name)` | 返回 `Bookmark | null` |
-| `bookmark.name` / `bookmark.id` | 书签名称 |
-| `bookmark.rangeKind` | `paragraph` / `text` / `complex` |
-| `bookmark.getInfo()` | 读取当前 `BookmarkInfo` |
-| `bookmark.getText()` | 读取书签覆盖文本，复杂书签可能返回 `null` |
-| `bookmark.getParagraph()` | 读取书签所在段落，复杂书签可能返回 `null` |
-| `bookmark.delete()` | 删除该书签并立即提交 |
+| API                             | 说明                                      |
+| ------------------------------- | ----------------------------------------- |
+| `doc.bookmarks.list(opts?)`     | 返回可操作的 `Bookmark[]`                 |
+| `doc.bookmarks.get(name)`       | 返回 `Bookmark                            | null` |
+| `bookmark.name` / `bookmark.id` | 书签名称                                  |
+| `bookmark.rangeKind`            | `paragraph` / `text` / `complex`          |
+| `bookmark.getInfo()`            | 读取当前 `BookmarkInfo`                   |
+| `bookmark.getText()`            | 读取书签覆盖文本，复杂书签可能返回 `null` |
+| `bookmark.getParagraph()`       | 读取书签所在段落，复杂书签可能返回 `null` |
+| `bookmark.delete()`             | 删除该书签并立即提交                      |
 
 ## Comment
 
@@ -131,19 +131,19 @@ if (comment) {
 }
 ```
 
-| API | 说明 |
-|---|---|
-| `doc.comments.list()` | 返回可操作的 `Comment[]` |
-| `doc.comments.get(id)` | 返回 `Comment | null` |
-| `comment.id` | 批注 ID |
-| `comment.text` | 批注正文快照 |
-| `comment.anchorText` | 被批注正文片段快照 |
-| `comment.rangeKind` | `paragraph` / `text` / `complex` |
-| `comment.getInfo()` | 读取当前 `CommentInfo` |
-| `comment.getText()` | 读取当前批注正文 |
+| API                       | 说明                                            |
+| ------------------------- | ----------------------------------------------- |
+| `doc.comments.list()`     | 返回可操作的 `Comment[]`                        |
+| `doc.comments.get(id)`    | 返回 `Comment                                   | null` |
+| `comment.id`              | 批注 ID                                         |
+| `comment.text`            | 批注正文快照                                    |
+| `comment.anchorText`      | 被批注正文片段快照                              |
+| `comment.rangeKind`       | `paragraph` / `text` / `complex`                |
+| `comment.getInfo()`       | 读取当前 `CommentInfo`                          |
+| `comment.getText()`       | 读取当前批注正文                                |
 | `comment.getAnchorText()` | 读取当前被批注正文片段，复杂锚点可能返回 `null` |
-| `comment.getParagraph()` | 读取批注锚点所在段落，复杂锚点可能返回 `null` |
-| `comment.delete()` | 删除批注正文和锚点并立即提交 |
+| `comment.getParagraph()`  | 读取批注锚点所在段落，复杂锚点可能返回 `null`   |
+| `comment.delete()`        | 删除批注正文和锚点并立即提交                    |
 
 ## Revision
 
@@ -155,21 +155,21 @@ if (revision) {
 }
 ```
 
-| API | 说明 |
-|---|---|
-| `doc.revisions.list(opts?)` | 返回可读取的 `Revision[]` |
-| `doc.revisions.get(revId, opts?)` | 返回 `Revision | null` |
-| `doc.revisions.accept(opts?)` | 接受全部支持的修订 |
-| `doc.revisions.reject(opts?)` | 拒绝全部支持的修订 |
-| `revision.revId` / `revision.id` | 修订 ID |
-| `revision.kind` | `RevisionKind`（内容、属性、移动、表格、custom XML 修订） |
-| `revision.ooxmlType` | 精确 OOXML 修订元素名 |
-| `revision.text` | 修订涉及文本快照 |
-| `revision.getInfo()` | 读取当前 `RevisionInfo` |
-| `revision.getText()` | 读取当前修订涉及文本 |
-| `revision.getParagraph()` | 读取修订所在段落，无法定位到单段时返回 `null` |
-| `revision.accept()` | 接受这一条修订 |
-| `revision.reject()` | 拒绝这一条修订 |
+| API                               | 说明                                                      |
+| --------------------------------- | --------------------------------------------------------- |
+| `doc.revisions.list(opts?)`       | 返回可读取的 `Revision[]`                                 |
+| `doc.revisions.get(revId, opts?)` | 返回 `Revision                                            | null` |
+| `doc.revisions.accept(opts?)`     | 接受全部支持的修订                                        |
+| `doc.revisions.reject(opts?)`     | 拒绝全部支持的修订                                        |
+| `revision.revId` / `revision.id`  | 修订 ID                                                   |
+| `revision.kind`                   | `RevisionKind`（内容、属性、移动、表格、custom XML 修订） |
+| `revision.ooxmlType`              | 精确 OOXML 修订元素名                                     |
+| `revision.text`                   | 修订涉及文本快照                                          |
+| `revision.getInfo()`              | 读取当前 `RevisionInfo`                                   |
+| `revision.getText()`              | 读取当前修订涉及文本                                      |
+| `revision.getParagraph()`         | 读取修订所在段落，无法定位到单段时返回 `null`             |
+| `revision.accept()`               | 接受这一条修订                                            |
+| `revision.reject()`               | 拒绝这一条修订                                            |
 
 单条修订使用 `revision.accept()` / `revision.reject()`。全部修订使用
 `doc.revisions.accept()` / `doc.revisions.reject()`，或 WordPlan 的
@@ -193,6 +193,17 @@ await table?.cell(0, 0).findText('target', { scope: 'all' }).setColor('FF0000');
 await table?.cell(0, 0).setShading('FFF2CC');
 await table?.cell(0, 0).setVerticalAlignment('center');
 await table?.cell(0, 0).setWidth(2600);
+await table?.cell(0, 0).setBorders({
+  top: { val: 'single', color: '000000', size: 4 },
+});
+await table?.setBorders({
+  top: { val: 'single', color: '000000', size: 4 },
+  right: { val: 'single', color: '000000', size: 4 },
+  bottom: { val: 'single', color: '000000', size: 4 },
+  left: { val: 'single', color: '000000', size: 4 },
+  insideH: { val: 'single', color: '000000', size: 4 },
+  insideV: { val: 'single', color: '000000', size: 4 },
+});
 await table?.row(2).delete();
 await table?.column(1).setWidth(2400);
 const blocks = await table?.cell(0, 0).getBlocks();

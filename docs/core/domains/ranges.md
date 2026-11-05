@@ -38,10 +38,10 @@ The range resolves lazily when a write method runs. If no text is found, the ope
 | `range.replaceWith(text, opts?)` | Replace matched text with plain text. | `text: string`, `LiveObjectWriteOptions?` | `Promise<ApplyResult>` |
 | `range.delete(opts?)` | Delete matched text. | `LiveObjectWriteOptions?` | `Promise<ApplyResult>` |
 | `range.setBold(value, opts?)` | Set bold. | `value: boolean` | `Promise<ApplyResult>` |
-| `range.setColor(value, opts?)` | Set font color. | `value: string` | `Promise<ApplyResult>` |
+| `range.setColor(value, opts?)` | Set the text foreground/font color. | `value: string` | `Promise<ApplyResult>` |
 | `range.setItalic(value, opts?)` | Set italic. | `value: boolean` | `Promise<ApplyResult>` |
 | `range.setUnderline(value, opts?)` | Set single underline. | `value: boolean` | `Promise<ApplyResult>` |
-| `range.setHighlight(value, opts?)` | Set Word highlight color. | `value: string` | `Promise<ApplyResult>` |
+| `range.setHighlight(value, opts?)` | Set the background behind the text using Word Text Highlight Color. | `value: string` | `Promise<ApplyResult>` |
 | `range.setFontSize(value, opts?)` | Set font size in points. | `value: number` | `Promise<ApplyResult>` |
 | `range.setFontFamily(value, opts?)` | Set font family. | `value: string` | `Promise<ApplyResult>` |
 | `range.addComment(text, opts?)` | Add a comment to matched text. | `text: string`, `LiveObjectWriteOptions?` such as `{author:'halvee'}` | `Promise<ApplyResult>` |
@@ -59,8 +59,13 @@ The range resolves lazily when a write method runs. If no text is found, the ope
 
 | API | Value Shape | Example |
 | --- | --- | --- |
-| `setColor` | OOXML color string, usually `RRGGBB`. | `'FF0000'` |
-| `setHighlight` | Word highlight value. | `'yellow'` |
+| `setColor` | Text foreground/font color as an OOXML color string, usually `RRGGBB`. | `'FF0000'` |
+| `setHighlight` | Text background/highlight as a Word highlight name. | `'yellow'` |
+
+These properties are independent and may be combined. Use `setColor('FF0000')` for red
+text, and use `setHighlight('yellow')` for a yellow background behind the text. Do not use
+`setColor('FFFF00')` to simulate a yellow text background. `setHighlight` accepts Word
+highlight names rather than arbitrary RGB values.
 
 ## Examples
 
@@ -72,6 +77,26 @@ if (paragraph) {
   const range = paragraph.findText('错别字', { scope: 'all' });
   await range.setColor('FF0000');
   await range.setBold(true);
+}
+```
+
+Apply a yellow background behind matched text:
+
+```ts
+const paragraph = await doc.paragraphs.get('31086A56');
+if (paragraph) {
+  await paragraph.findText('待确认', { scope: 'all' }).setHighlight('yellow');
+}
+```
+
+Combine red text with a yellow background:
+
+```ts
+const paragraph = await doc.paragraphs.get('31086A56');
+if (paragraph) {
+  const range = paragraph.findText('待确认', { scope: 'all' });
+  await range.setColor('FF0000');
+  await range.setHighlight('yellow');
 }
 ```
 

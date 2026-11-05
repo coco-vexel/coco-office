@@ -2632,6 +2632,10 @@ function mapDrawingTextAlign(value: string): string {
 export function renderNativeTable(table: NativeWordTableNode): HTMLElement {
   const el = document.createElement('coco-word-native-table');
   el.setAttribute('data-table-id', table.tableId);
+  if (!nativeTableHasVisibleBorders(table)) {
+    el.classList.add('shows-auxiliary-gridlines');
+    el.dataset.auxiliaryGridlines = 'true';
+  }
   if (table.revision) {
     el.classList.add(table.revision.revisionKind === 'delete' ? 'coco-word-revision-delete' : 'coco-word-revision-insert');
     el.dataset.revisionId = table.revision.revisionId;
@@ -2829,6 +2833,17 @@ function tableBorderCss(table: NativeWordTableNode): string | null {
   const width = border.size !== undefined ? Math.max(0.5, border.size / 8) : 0.75;
   const style = border.val === 'double' ? 'double' : 'solid';
   return `${width}pt ${style} ${color}`;
+}
+
+function nativeTableHasVisibleBorders(table: NativeWordTableNode): boolean {
+  const hasVisibleBorder = (borders: EditorTableBorders | undefined): boolean =>
+    Object.values(borders ?? {}).some((border) =>
+      border !== undefined && border.val !== 'none' && border.val !== 'nil',
+    );
+
+  return hasVisibleBorder(table.borders) || table.rows.some((row) =>
+    row.cells.some((cell) => hasVisibleBorder(cell.borders)),
+  );
 }
 
 function defineElement(name: string): void {

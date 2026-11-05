@@ -607,13 +607,25 @@ describe('live object APIs on real docx packages', () => {
       mode: 'inline',
     });
 
-    let cell = (await doc.tables.list({ includeCellTexts: true }))[0]!.cell(0, 0);
+    let table = (await doc.tables.list({ includeCellTexts: true }))[0]!;
+    let cell = table.cell(0, 0);
     await cell.setShading('FFF2CC');
     await cell.setVerticalAlignment('center');
     await cell.setWidth(2600);
+    const border = { val: 'single' as const, color: '000000', size: 4 };
+    await table.setBorders({
+      top: border,
+      right: border,
+      bottom: border,
+      left: border,
+      insideH: border,
+      insideV: border,
+    });
+    await cell.setBorders({ bottom: { val: 'double', color: '4472C4', size: 8 } });
 
     doc = await reload(doc, 'live-cell-format-reload');
-    cell = (await doc.tables.list({ includeCellTexts: true }))[0]!.cell(0, 0);
+    table = (await doc.tables.list({ includeCellTexts: true }))[0]!;
+    cell = table.cell(0, 0);
     const info = await cell.getInfo();
     expect(info?.shading).toEqual({ fill: 'FFF2CC', val: 'clear' });
     expect(info?.verticalAlignment).toBe('center');
@@ -623,6 +635,10 @@ describe('live object APIs on real docx packages', () => {
     expect(xml).toContain('w:tcW w:w="2600" w:type="dxa"');
     expect(xml).toContain('w:shd w:val="clear" w:fill="FFF2CC"');
     expect(xml).toContain('w:vAlign w:val="center"');
+    expect(xml).toContain('<w:tblBorders>');
+    expect(xml).toContain('<w:insideH w:val="single" w:color="000000" w:sz="4"');
+    expect(xml).toContain('<w:tcBorders>');
+    expect(xml).toContain('<w:bottom w:val="double" w:color="4472C4" w:sz="8"');
     await doc.dispose();
   });
 

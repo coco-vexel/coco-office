@@ -24,6 +24,7 @@ import type { Transport } from './transport.js';
 import type { WordErrorCode } from './word-error.js';
 import type { SdtSpec } from './sdt-builders.js';
 import type { RowHeight } from './list-tables.js';
+import type { WordTableBorders } from './table-borders.js';
 import { WordError } from './word-error.js';
 
 // ─────────── 类型别名(docs/03.1 §1.1 / §1.3 / §1.7)───────────
@@ -87,6 +88,7 @@ export interface TableCellDirectFormat {
     val?: string;
   };
   verticalAlignment?: 'top' | 'center' | 'bottom' | 'both';
+  borders?: WordTableBorders;
   /** Cell width in twips, written as tcW type='dxa'. */
   width?: number;
 }
@@ -376,6 +378,7 @@ export type Op =
   //  - tableId: 目标表格
   //  - widths: 新列宽数组（twips），长度必须等于 colCount；只改 gridCol w:w，不动 tcW
   | { type: 'setTableColumnWidths'; tableId: string; widths: number[] }
+  | { type: 'setTableBorders'; tableId: string; borders: WordTableBorders }
   // task-core-table-rowheight 设表格行高（用于 merger 克隆模板后保真源表行高）
   //  - tableId: 目标表格
   //  - heights: 每行行高数组（RowHeight | null），长度必须等于 rowCount
@@ -748,6 +751,7 @@ export interface WordPlan {
    * - trackChanges=true → `UNSUPPORTED_OOXML_FEATURE`（暂不支持）。
    */
   setTableColumnWidths(spec: { tableId: string; widths: number[] }): this;
+  setTableBorders(spec: { tableId: string; borders: WordTableBorders }): this;
 
   /**
    * 设表格行高（task-core-table-rowheight：merger 保真源表行高）。
@@ -1200,6 +1204,12 @@ export class WordPlanImpl implements WordPlan {
       tableId: spec.tableId,
       widths: spec.widths,
     });
+    return this;
+  }
+
+  setTableBorders(spec: { tableId: string; borders: WordTableBorders }): this {
+    this.ensureOpen('setTableBorders');
+    this._ops.push({ type: 'setTableBorders', tableId: spec.tableId, borders: spec.borders });
     return this;
   }
 

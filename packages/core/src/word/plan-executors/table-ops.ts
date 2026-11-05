@@ -26,6 +26,7 @@ import { buildInlineSdt, hashSdtId } from '../sdt-builders.js';
 import { appendTextAsRuns, collectParagraphAnchors, pickFirstRunRPr } from './_shared.js';
 import type { ExecutorContext } from './executor-context.js';
 import { generateParaId } from '../para-id.js';
+import { writeWordTableBorders, type WordTableBorders } from '../table-borders.js';
 
 const COMMENTS_PART_PATH = 'word/comments.xml';
 
@@ -357,7 +358,30 @@ export function executeFormatTableCell(
     vAlign.setAttributeNS(W_NS, 'w:val', op.format.verticalAlignment);
   }
 
+  if (op.format.borders !== undefined) {
+    writeWordTableBorders(tcPr, 'cell', op.format.borders);
+  }
+
   markStoryPartDirty(ctx, tc, 'formatTableCell');
+}
+
+export function executeSetTableBorders(
+  ctx: ExecutorContext,
+  op: Extract<Op, { type: 'setTableBorders' }>,
+): void {
+  if (ctx.options.trackChanges) {
+    throw new WordError(
+      'UNSUPPORTED_OOXML_FEATURE',
+      'setTableBorders does not support trackChanges yet',
+      ctx.docId,
+      { tableId: op.tableId, opType: 'setTableBorders' },
+    );
+  }
+  validateWordTableBorders(ctx, op.tableId, 'setTableBorders', op.borders);
+  const table = requireTable(ctx, op.tableId, 'setTableBorders');
+  const properties = ensureTableProperties(table);
+  writeWordTableBorders(properties, 'table', op.borders);
+  markStoryPartDirty(ctx, table, 'setTableBorders');
 }
 
 export function executeInsertTableCellParagraph(
@@ -1274,6 +1298,14 @@ function ensureTableCellProperties(tc: Element): Element {
   return tcPr;
 }
 
+function ensureTableProperties(table: Element): Element {
+  const existing = firstChildW(table, 'tblPr');
+  if (existing) return existing;
+  const properties = table.ownerDocument!.createElementNS(W_NS, 'w:tblPr');
+  table.insertBefore(properties, table.firstChild);
+  return properties;
+}
+
 function upsertTcPrChild(tcPr: Element, localName: string, afterLocals: Set<string>): Element {
   const existing = firstChildW(tcPr, localName);
   if (existing) return existing;
@@ -1304,7 +1336,8 @@ function validateTableCellFormat(
   if (
     op.format.width === undefined &&
     op.format.shading === undefined &&
-    op.format.verticalAlignment === undefined
+    op.format.verticalAlignment === undefined &&
+    op.format.borders === undefined
   ) {
     throw new WordError(
       'INVALID_ARGUMENT',
@@ -1353,6 +1386,90 @@ function validateTableCellFormat(
         'formatTableCell shading requires fill, color, or val',
         ctx.docId,
         { tableId: op.tableId, row: op.row, col: op.col, opType: 'formatTableCell' },
+      );
+    }
+  }
+  if (op.format.borders !== undefined) {
+    validateWordTableBorders(ctx, op.tableId, 'formatTableCell', op.format.borders, op.row, op.col);
+  }
+}
+
+function validateWordTableBorders(
+  ctx: ExecutorContext,
+  tableId: string,
+  opType: 'formatTableCell' | 'setTableBorders',
+  borders: WordTableBorders,
+  row?: number,
+  col?: number,
+): void {
+  const entries = Object.entries(borders);
+  const context = {
+    tableId,
+    opType,
+    ...(row === undefined ? {} : { row }),
+    ...(col === undefined ? {} : { col }),
+  };
+  if (entries.length === 0) {
+    throw new WordError(
+      'INVALID_ARGUMENT',
+      `${opType} borders requires at least one side`,
+      ctx.docId,
+      context,
+    );
+  }
+  for (const [side, border] of entries) {
+    if (!['top', 'right', 'bottom', 'left', 'insideH', 'insideV'].includes(side) || !border) {
+      throw new WordError(
+        'INVALID_ARGUMENT',
+        `${opType} contains an invalid border side`,
+        ctx.docId,
+        { ...context, side },
+      );
+    }
+    if (
+      !['nil', 'none', 'single', 'double', 'dotted', 'dashed', 'dotDash', 'dotDotDash'].includes(
+        border.val,
+      )
+    ) {
+      throw new WordError(
+        'INVALID_ARGUMENT',
+        `${opType} border ${side}.val is unsupported`,
+        ctx.docId,
+        { ...context, side, val: border.val },
+      );
+    }
+    if (
+      border.color !== undefined &&
+      border.color !== 'auto' &&
+      !/^[0-9A-Fa-f]{6}$/.test(border.color)
+    ) {
+      throw new WordError(
+        'INVALID_ARGUMENT',
+        `${opType} border ${side}.color must be a 6-digit hex color or auto`,
+        ctx.docId,
+        { ...context, side, color: border.color },
+      );
+    }
+    if (
+      border.size !== undefined &&
+      (!Number.isInteger(border.size) || border.size < 1 || border.size > 96)
+    ) {
+      throw new WordError(
+        'INVALID_ARGUMENT',
+        `${opType} border ${side}.size must be an integer from 1 to 96`,
+        ctx.docId,
+        { ...context, side, size: border.size },
+      );
+    }
+    if (
+      border.space !== undefined &&
+      (!Number.isInteger(border.space) || border.space < 0 || border.space > 31)
+    ) {
+      throw new WordError(
+        'INVALID_ARGUMENT',
+        `${opType} border ${side}.space must be an integer from 0 to 31`,
+        ctx.docId,
+        { ...context, side, space: border.space },
       );
     }
   }

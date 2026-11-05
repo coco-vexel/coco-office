@@ -982,6 +982,14 @@ function collectAffectedPartPaths(
           }
           break;
         }
+        case 'setTableBorders': {
+          const tbl = indices.tblIdx.get(op.tableId);
+          if (tbl) {
+            const partPath = findStoryPartPathFor(tbl);
+            if (partPath) paths.add(partPath);
+          }
+          break;
+        }
         case 'insertTableCellParagraph': {
           const tbl = indices.tblIdx.get(op.tableId);
           if (tbl) {

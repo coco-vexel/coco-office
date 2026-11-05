@@ -281,6 +281,7 @@ function affectsTableStructureOrContent(op: Op): boolean {
     case 'insertTableFrom':
     case 'setTableColumnWidths':
     case 'setTableRowHeights':
+    case 'setTableBorders':
       return true;
     case 'deleteParagraph':
     case 'insertParagraphBefore':

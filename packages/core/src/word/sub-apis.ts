@@ -47,6 +47,7 @@ import type {
   Range,
   TableCellDirectFormat,
 } from './plan.js';
+import type { WordTableBorders } from './table-borders.js';
 import type { ListRevisionsOptions, RevisionInfo } from './revision-queries.js';
 import type { SectionInfo } from './section-queries.js';
 import type { TocFieldRange } from './toc-queries.js';
@@ -276,7 +277,7 @@ export interface TextRange {
    */
   setBold(value: boolean, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   /**
-   * Sets font color on the matched text.
+   * Sets the foreground color of the matched text.
    */
   setColor(value: string, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   /**
@@ -288,7 +289,7 @@ export interface TextRange {
    */
   setUnderline(value: boolean, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   /**
-   * Sets Word highlight color on the matched text.
+   * Sets the background behind the matched text using Word Text Highlight Color.
    */
   setHighlight(value: string, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   /**
@@ -597,6 +598,8 @@ export interface Table extends TableInfo {
    * Pass `null` for a row that should keep its current height.
    */
   setRowHeights(heights: (RowHeight | null)[], opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
+  /** Sets direct table outer and inside borders. */
+  setBorders(borders: WordTableBorders, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
 }
 
 /**
@@ -656,6 +659,8 @@ export interface TableCell {
    * Sets direct cell width in twips.
    */
   setWidth(width: number, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
+  /** Sets direct borders on this table cell. */
+  setBorders(borders: WordTableBorders, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
 }
 
 export type TableCellBlock =
@@ -687,9 +692,11 @@ export interface CellTextRange {
   replaceWith(text: string, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   delete(opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   setBold(value: boolean, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
+  /** Sets the foreground color of the matched text. */
   setColor(value: string, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   setItalic(value: boolean, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   setUnderline(value: boolean, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
+  /** Sets the background behind the matched text using Word Text Highlight Color. */
   setHighlight(value: string, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   setFontSize(value: number, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
   setFontFamily(value: string, opts?: LiveObjectWriteOptions): Promise<ApplyResult>;
@@ -1798,6 +1805,10 @@ class LiveTable implements Table {
     return this.apply([{ type: 'setTableRowHeights', tableId: this.tableId, heights }], opts);
   }
 
+  setBorders(borders: WordTableBorders, opts: LiveObjectWriteOptions = {}): Promise<ApplyResult> {
+    return this.apply([{ type: 'setTableBorders', tableId: this.tableId, borders }], opts);
+  }
+
   private apply(ops: Op[], opts: LiveObjectWriteOptions = {}): Promise<ApplyResult> {
     this.assertNotDisposed();
     return this.transport.call<ApplyResult>('applyPlan', [
@@ -1899,6 +1910,10 @@ class LiveTableCell implements TableCell {
 
   setWidth(width: number, opts?: LiveObjectWriteOptions): Promise<ApplyResult> {
     return this.applyCellFormat({ width }, opts);
+  }
+
+  setBorders(borders: WordTableBorders, opts?: LiveObjectWriteOptions): Promise<ApplyResult> {
+    return this.applyCellFormat({ borders }, opts);
   }
 
   private async toLiveBlock(

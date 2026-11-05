@@ -52,6 +52,7 @@ import {
   executeCloneTableAfter,
   executeSetTableColumnWidths,
   executeSetTableRowHeights,
+  executeSetTableBorders,
 } from './table-ops.js';
 import {
   executeReplaceDrawingWithPlaceholder,
@@ -154,6 +155,9 @@ export function dispatchOp(op: Op, ctx: ExecutorContext): void {
     // task-core-table-rowheight
     case 'setTableRowHeights':
       executeSetTableRowHeights(ctx, op);
+      return;
+    case 'setTableBorders':
+      executeSetTableBorders(ctx, op);
       return;
     // #190
     case 'replaceDrawingWithPlaceholder':
