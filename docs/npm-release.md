@@ -1,6 +1,6 @@
 # npm release procedure
 
-The current release set is version `1.0.6`: `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. The workspace root stays private. Follow this procedure for subsequent releases and replace the example version and tarball names consistently.
+The target release set is version `1.0.7`: `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. The workspace root stays private. Follow this procedure for subsequent releases and replace the example version and tarball names consistently. Until publication is verified, the npm registry remains authoritative for the currently public version.
 
 ## Prepare and review
 
@@ -13,12 +13,12 @@ The current release set is version `1.0.6`: `@coco-vexel/coco-office`, `@coco-ve
 
 ## Publish after explicit approval
 
-Publish the reviewed tarballs in this order: Core, then Editor and OOJSON. Both depend on Core `^1.0.6`. Do not recursively publish the entire workspace.
+Publish the reviewed tarballs in this order: Core, then Editor and OOJSON. Both depend on Core `^1.0.7`. Do not recursively publish the entire workspace.
 
 ```bash
-npm publish .release-check/packages/coco-vexel-coco-office-1.0.6.tgz --access public
-npm publish .release-check/packages/coco-vexel-coco-office-editor-1.0.6.tgz --access public
-npm publish .release-check/packages/coco-vexel-coco-office-oojson-1.0.6.tgz --access public
+npm publish .release-check/packages/coco-vexel-coco-office-1.0.7.tgz --access public
+npm publish .release-check/packages/coco-vexel-coco-office-editor-1.0.7.tgz --access public
+npm publish .release-check/packages/coco-vexel-coco-office-oojson-1.0.7.tgz --access public
 ```
 
 Adjust filenames only when approved versions have changed, and regenerate/reverify their tarballs. If a version already exists, choose a new version and update dependents; do not attempt to replace it. Do not rebuild different bytes between review and publish.

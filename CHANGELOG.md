@@ -2,6 +2,22 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.7] - 2026-11-06
+
+### Added
+
+- Added portable worksheet layout, print setup and drawing-line mutations for
+  generating host-compatible spreadsheet templates such as copybooks.
+- Added standard spreadsheet editing, keyboard navigation and rich clipboard
+  transfers across the browser editor runtime.
+- Added Word table border APIs and editor gridline support.
+
+### Fixed
+
+- Preserved blank cell styles, worksheet print settings and spreadsheet
+  geometry across OOXML round trips and Office host rendering.
+- Applied paragraph formatting across selected Word table cells.
+
 ## [1.0.6] - 2026-11-04
 
 ### Added
@@ -82,6 +98,7 @@ All notable changes to Coco Office are documented in this file.
 
 - Initial open-source release of Core, Editor and OOJSON packages.
 
+[1.0.7]: https://github.com/coco-vexel/coco-office/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/coco-vexel/coco-office/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/coco-vexel/coco-office/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/coco-vexel/coco-office/compare/v1.0.3...v1.0.4
