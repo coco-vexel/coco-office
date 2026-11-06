@@ -7,6 +7,12 @@ import { ExcelNamedItemCollection } from './names.js';
 import { ExcelWorksheetCollection } from './worksheet.js';
 import { ExcelMutationLog, type ExcelWorkbookMutation } from './mutations.js';
 import { importExcelCellStyles, type ExcelCellStyleSnapshot } from './cell-style.js';
+import {
+  addWorksheetLinesToPackage,
+  setWorksheetPrintSetupInPackage,
+  type ExcelWorksheetLineOptions,
+  type ExcelWorksheetPrintSetupOptions,
+} from './worksheet-layout.js';
 
 export interface ExcelLoadOptions {
   workbookId?: string;
@@ -100,9 +106,40 @@ export class ExcelWorkbookCore {
     return this.pkg;
   }
 
+  addWorksheetLines(sheetNameOrId: string, lines: readonly ExcelWorksheetLineOptions[]): void {
+    const sheet = this.worksheets.getItem(sheetNameOrId);
+    this.materializePackage();
+    const sheetPath = this.resolveWorksheetPackagePath(sheet.id());
+    addWorksheetLinesToPackage(this.pkg, sheetPath, lines);
+    this.mutationLog.record({
+      kind: 'worksheet.addLines',
+      sheetId: sheet.id(),
+      sheetName: sheet.name(),
+      lines: [...lines],
+    });
+  }
+
+  setWorksheetPrintSetup(
+    sheetNameOrId: string,
+    options: ExcelWorksheetPrintSetupOptions,
+  ): void {
+    const sheet = this.worksheets.getItem(sheetNameOrId);
+    this.materializePackage();
+    const sheetPath = this.resolveWorksheetPackagePath(sheet.id());
+    const localSheetId = this.worksheets.items().findIndex((candidate) => candidate.id() === sheet.id());
+    setWorksheetPrintSetupInPackage(this.pkg, sheetPath, sheet.name(), localSheetId, options);
+    this.mutationLog.record({
+      kind: 'worksheet.setPrintSetup',
+      sheetId: sheet.id(),
+      sheetName: sheet.name(),
+      options,
+    });
+  }
+
   async toZip(): Promise<Uint8Array> {
     if (this.pkg.parts.size === 0) {
-      return toZip(createWorkbookPackageFromModel(this.model));
+      this.materializePackage();
+      return toZip(this.pkg);
     }
     const cellPatches = collectContentOnlyCellPatches(this.baselineModel, this.model);
     if (cellPatches) {
@@ -115,6 +152,20 @@ export class ExcelWorkbookCore {
     const bytes = await toZip(this.pkg);
     this.baselineModel = structuredCloneModel(this.model);
     return bytes;
+  }
+
+  private materializePackage(): void {
+    if (this.pkg.parts.size > 0) return;
+    const materialized = createWorkbookPackageFromModel(this.model);
+    for (const [path, part] of materialized.parts) this.pkg.parts.set(path, part);
+  }
+
+  private resolveWorksheetPackagePath(sheetId: string): string {
+    const index = this.model.sheets.findIndex((sheet) => sheet.id === sheetId);
+    if (index < 0) throw new Error(`Worksheet not found: ${sheetId}`);
+    const path = this.model.sheets[index]?.path ?? `xl/worksheets/sheet${index + 1}.xml`;
+    if (!this.pkg.parts.has(path)) throw new Error(`Worksheet has no package part: ${sheetId}`);
+    return path;
   }
 }
 

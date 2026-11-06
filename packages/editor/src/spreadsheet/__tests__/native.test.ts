@@ -2,11 +2,34 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { captureExcelCellStyle, ExcelWorkbook } from '@coco-vexel/coco-office/excel';
 import { SPREADSHEET_CLIPBOARD_MIME } from '../clipboard.js';
-import { renderSpreadsheetEditor, type SpreadsheetEditor, type SpreadsheetEditorOptions } from '../native.js';
+import {
+  copybookGuideAppearance,
+  renderSpreadsheetEditor,
+  type SpreadsheetEditor,
+  type SpreadsheetEditorOptions,
+} from '../native.js';
 import { SpreadsheetCanvasRenderer } from '../canvas-renderer.js';
 import { SpreadsheetLayout } from '../layout.js';
 
 const editors: SpreadsheetEditor[] = [];
+
+test('recognizes Tianzi and Pinyin guide shapes used by copybook workbooks', () => {
+  const shape = (name: string) => ({
+    kind: 'twoCell' as const,
+    object: { kind: 'shape' as const, name },
+  });
+  expect(copybookGuideAppearance(shape('coco-tianzige-horizontal-3-2')))
+    .toEqual({ orientation: 'horizontal', dash: 'dashed' });
+  expect(copybookGuideAppearance(shape('coco-tianzige-vertical-3-2')))
+    .toEqual({ orientation: 'vertical', dash: 'dashed' });
+  expect(copybookGuideAppearance(shape('coco-pinyin-guide-2-1')))
+    .toEqual({ orientation: 'horizontal', dash: 'dashed' });
+  expect(copybookGuideAppearance(shape('coco-pinyin-outline-2-top')))
+    .toEqual({ orientation: 'horizontal', dash: 'solid' });
+  expect(copybookGuideAppearance(shape('coco-pinyin-outline-2-vertical-4')))
+    .toEqual({ orientation: 'vertical', dash: 'solid' });
+  expect(copybookGuideAppearance(shape('unrelated-shape'))).toBeNull();
+});
 
 beforeEach(() => {
   vi.stubGlobal('confirm', vi.fn(() => { throw new Error('Native confirm must not be used by the editor'); }));

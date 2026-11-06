@@ -24,13 +24,17 @@ import type {
   ExcelRangeSetBorderMutation,
   ExcelRangeSetColumnWidthMutation,
   ExcelRangeSetFillForegroundColorMutation,
+  ExcelRangeSetFontMutation,
   ExcelRangeSetFontColorMutation,
+  ExcelRangeSetAlignmentMutation,
   ExcelRangeSetRowHeightMutation,
   ExcelWorkbookMutation,
 } from './mutations.js';
 
 type ReplayableRangeFormatMutation =
   | Omit<ExcelRangeSetFontColorMutation, 'sheetId' | 'sheetName'>
+  | Omit<ExcelRangeSetFontMutation, 'sheetId' | 'sheetName'>
+  | Omit<ExcelRangeSetAlignmentMutation, 'sheetId' | 'sheetName'>
   | Omit<ExcelRangeSetFillForegroundColorMutation, 'sheetId' | 'sheetName'>
   | Omit<ExcelRangeSetBorderMutation, 'sheetId' | 'sheetName'>;
 
@@ -703,8 +707,13 @@ export class ExcelRangeFontFormat {
         format.applyFont = true;
         return format;
       },
-      options,
+      { ...options, recordUnsafe: false },
     );
+    this.range.recordReplayableMutation({
+      kind: 'range.format.font.setValue',
+      address: this.range.address(),
+      font: normalized,
+    });
   }
 
   bold(): boolean | undefined {
@@ -933,6 +942,11 @@ export class ExcelRangeAlignmentFormat {
         format.applyAlignment = true;
       }
       return format;
+    }, { recordUnsafe: false });
+    this.range.recordReplayableMutation({
+      kind: 'range.format.alignment.setValue',
+      address: this.range.address(),
+      alignment: alignment ? { ...alignment } : undefined,
     });
   }
 

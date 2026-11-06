@@ -772,7 +772,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
 
     for (const drawing of sheet.drawings) {
       for (const anchor of drawing.anchors) {
-        const guide = tianzigeGuideOrientation(anchor);
+        const guide = copybookGuideAppearance(anchor);
         if (!guide) continue;
         const logicalRect = chartLogicalRect(layout, anchor);
         if (!logicalRect) continue;
@@ -788,10 +788,10 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
             height: `${Math.max(1, fragment.height)}px`,
             boxSizing: 'border-box',
             pointerEvents: 'none',
-            opacity: '0.72',
-            ...(guide === 'horizontal'
-              ? { borderTop: '1px dashed #4F9185' }
-              : { borderLeft: '1px dashed #4F9185' }),
+            opacity: guide.dash === 'dashed' ? '0.72' : '1',
+            ...(guide.orientation === 'horizontal'
+              ? { borderTop: `1px ${guide.dash} #4F9185` }
+              : { borderLeft: `1px ${guide.dash} #4F9185` }),
           });
           this.unsupportedObjectLayer.appendChild(line);
         }
@@ -2068,14 +2068,31 @@ function findChartAnchor(
   );
 }
 
-function tianzigeGuideOrientation(
+export function copybookGuideAppearance(
   anchor: ExcelDrawingAnchorModel,
-): 'horizontal' | 'vertical' | null {
+): { orientation: 'horizontal' | 'vertical'; dash: 'dashed' | 'solid' } | null {
   if (anchor.object?.kind !== 'shape') return null;
-  const match = anchor.object.name?.match(
+  const name = anchor.object.name ?? '';
+  const tianzigeGuide = name.match(
     /^coco-tianzige-(horizontal|vertical)-/,
   );
-  return (match?.[1] as 'horizontal' | 'vertical' | undefined) ?? null;
+  if (tianzigeGuide?.[1]) {
+    return {
+      orientation: tianzigeGuide[1] as 'horizontal' | 'vertical',
+      dash: 'dashed',
+    };
+  }
+  if (/^coco-pinyin-guide-/.test(name)) {
+    return { orientation: 'horizontal', dash: 'dashed' };
+  }
+  const outline = name.match(
+    /^coco-(?:tianzige|pinyin)-outline-\d+-(top|bottom|vertical)(?:-|$)/,
+  );
+  if (!outline?.[1]) return null;
+  return {
+    orientation: outline[1] === 'vertical' ? 'vertical' : 'horizontal',
+    dash: 'solid',
+  };
 }
 
 function chartLogicalRect(

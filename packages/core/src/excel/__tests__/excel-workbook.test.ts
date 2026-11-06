@@ -780,6 +780,38 @@ describe('ExcelWorkbook', () => {
     expect(doc.worksheets.getItem('Sheet1').tables.toModel()[0]?.name).toBe('DemoTable');
   });
 
+  test('materializes a package before applying package-backed layout to a live model', async () => {
+    const source = await ExcelWorkbook.fromZip(await makeWorkbook());
+    const doc = ExcelWorkbook.fromModel(source.toModel(), { workbookId: 'live-layout-model' });
+
+    await doc.toZip();
+    doc.addWorksheetLines('Sheet1', [
+      {
+        name: 'guide-line',
+        from: { column: 0, columnOffset: 0, row: 0, rowOffset: 0 },
+        to: { column: 1, columnOffset: 0, row: 0, rowOffset: 0 },
+        width: 100,
+        height: 0,
+        dash: 'dash',
+      },
+    ]);
+    doc.setWorksheetPrintSetup('Sheet1', {
+      paperSize: 9,
+      orientation: 'portrait',
+      fitToWidth: 1,
+      fitToHeight: 1,
+      printArea: '$A$1:$D$2',
+    });
+
+    const zip = await JSZip.loadAsync(await doc.toZip());
+    const drawingXml = await zip.file('xl/drawings/drawing1.xml')!.async('string');
+    const workbookXml = await zip.file('xl/workbook.xml')!.async('string');
+
+    expect(doc.getPackage().parts.size).toBeGreaterThan(0);
+    expect(drawingXml).toContain('guide-line');
+    expect(workbookXml).toContain('_xlnm.Print_Area');
+  });
+
   test('toZip writes package-backed workbook mutations back to xlsx parts', async () => {
     const workbook = await ExcelWorkbook.fromZip(await makeWorkbook());
     const sheet = workbook.worksheets.getItem('Sheet1');

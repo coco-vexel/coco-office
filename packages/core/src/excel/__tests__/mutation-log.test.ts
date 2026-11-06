@@ -148,4 +148,41 @@ describe('Excel mutation log', () => {
       },
     ]);
   });
+
+  test('records copybook view and full text formatting as replayable operations', () => {
+    const workbook = ExcelWorkbookCore.fromModel(model());
+    const sheet = workbook.worksheets.getItem('Sheet1');
+
+    sheet.setSheetViews([{ workbookViewId: 0, showGridLines: false, selections: [] }]);
+    sheet.getRange('B2:N2').format.font.setValue({
+      name: 'KaiTi',
+      size: 26,
+      color: { rgb: '#D49A84' },
+    });
+    sheet.getRange('B2:N2').format.alignment.setValue({
+      horizontal: 'center',
+      vertical: 'center',
+    });
+
+    expect(workbook.getMutations()).toMatchObject([
+      {
+        kind: 'worksheet.setSheetViews',
+        sheetName: 'Sheet1',
+        sheetViews: [{ showGridLines: false }],
+      },
+      {
+        kind: 'range.format.font.setValue',
+        sheetName: 'Sheet1',
+        address: 'B2:N2',
+        font: { name: 'KaiTi', size: 26, color: { rgb: '#D49A84' } },
+      },
+      {
+        kind: 'range.format.alignment.setValue',
+        sheetName: 'Sheet1',
+        address: 'B2:N2',
+        alignment: { horizontal: 'center', vertical: 'center' },
+      },
+    ]);
+    expect(workbook.getMutations().some((mutation) => mutation.kind === 'unsafe')).toBe(false);
+  });
 });

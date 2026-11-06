@@ -405,11 +405,10 @@ export class ExcelWorksheet {
   setSheetViews(sheetViews: ExcelSheetViewModel[]): void {
     this.model.sheetViews = cloneSheetViews(sheetViews);
     this.recordMutation?.({
-      kind: 'unsafe',
-      scope: 'worksheet',
+      kind: 'worksheet.setSheetViews',
       sheetId: this.model.id,
       sheetName: this.model.name,
-      reason: 'worksheet.setSheetViews is not replayable by first-phase mutation writeback',
+      sheetViews: cloneSheetViews(sheetViews),
     });
   }
 

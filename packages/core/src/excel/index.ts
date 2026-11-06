@@ -50,6 +50,10 @@ export {
 } from './runtime.js';
 export { ExcelWorkbookCore, type ExcelLoadOptions } from './excel-workbook.js';
 export type {
+  ExcelWorksheetLineOptions,
+  ExcelWorksheetPrintSetupOptions,
+} from './worksheet-layout.js';
+export type {
   ExcelScriptApiPath,
   ExcelScriptApiReceiver,
   ExcelScriptApiReceiverMap,
@@ -180,13 +184,18 @@ export {
   type ExcelRangeMergeMutation,
   type ExcelRangeMutationBase,
   type ExcelRangeSetFormulasMutation,
+  type ExcelRangeSetFontMutation,
+  type ExcelRangeSetAlignmentMutation,
   type ExcelRangeSetValuesMutation,
   type ExcelRangeUnmergeMutation,
   type ExcelUnsafeMutation,
   type ExcelWorkbookMutation,
   type ExcelWorksheetAddMutation,
   type ExcelWorksheetDeleteMutation,
+  type ExcelWorksheetAddLinesMutation,
   type ExcelWorksheetRenameMutation,
+  type ExcelWorksheetSetPrintSetupMutation,
+  type ExcelWorksheetSetSheetViewsMutation,
 } from './mutations.js';
 export {
   applyExcelPatch,

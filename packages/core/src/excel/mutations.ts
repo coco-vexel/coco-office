@@ -1,4 +1,15 @@
-import type { ExcelBorderModel, ExcelCellValue, ExcelColorModel } from './model.js';
+import type {
+  ExcelAlignmentModel,
+  ExcelBorderModel,
+  ExcelCellValue,
+  ExcelColorModel,
+  ExcelFontModel,
+  ExcelSheetViewModel,
+} from './model.js';
+import type {
+  ExcelWorksheetLineOptions,
+  ExcelWorksheetPrintSetupOptions,
+} from './worksheet-layout.js';
 
 export type ExcelWorkbookMutation =
   | ExcelRangeSetValuesMutation
@@ -9,11 +20,16 @@ export type ExcelWorkbookMutation =
   | ExcelRangeSetRowHeightMutation
   | ExcelRangeSetColumnWidthMutation
   | ExcelRangeSetFontColorMutation
+  | ExcelRangeSetFontMutation
+  | ExcelRangeSetAlignmentMutation
   | ExcelRangeSetFillForegroundColorMutation
   | ExcelRangeSetBorderMutation
   | ExcelWorksheetAddMutation
   | ExcelWorksheetDeleteMutation
   | ExcelWorksheetRenameMutation
+  | ExcelWorksheetAddLinesMutation
+  | ExcelWorksheetSetPrintSetupMutation
+  | ExcelWorksheetSetSheetViewsMutation
   | ExcelUnsafeMutation;
 
 export interface ExcelMutationSheetRef {
@@ -62,6 +78,16 @@ export interface ExcelRangeSetFontColorMutation extends ExcelRangeMutationBase {
   color: ExcelColorModel | undefined;
 }
 
+export interface ExcelRangeSetFontMutation extends ExcelRangeMutationBase {
+  kind: 'range.format.font.setValue';
+  font: ExcelFontModel;
+}
+
+export interface ExcelRangeSetAlignmentMutation extends ExcelRangeMutationBase {
+  kind: 'range.format.alignment.setValue';
+  alignment: ExcelAlignmentModel | undefined;
+}
+
 export interface ExcelRangeSetFillForegroundColorMutation extends ExcelRangeMutationBase {
   kind: 'range.format.fill.setForegroundColor';
   color: ExcelColorModel | undefined;
@@ -84,6 +110,21 @@ export interface ExcelWorksheetRenameMutation extends ExcelMutationSheetRef {
   kind: 'worksheet.rename';
   oldName: string;
   newName: string;
+}
+
+export interface ExcelWorksheetAddLinesMutation extends ExcelMutationSheetRef {
+  kind: 'worksheet.addLines';
+  lines: ExcelWorksheetLineOptions[];
+}
+
+export interface ExcelWorksheetSetPrintSetupMutation extends ExcelMutationSheetRef {
+  kind: 'worksheet.setPrintSetup';
+  options: ExcelWorksheetPrintSetupOptions;
+}
+
+export interface ExcelWorksheetSetSheetViewsMutation extends ExcelMutationSheetRef {
+  kind: 'worksheet.setSheetViews';
+  sheetViews: ExcelSheetViewModel[];
 }
 
 export interface ExcelUnsafeMutation {
