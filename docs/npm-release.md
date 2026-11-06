@@ -1,6 +1,6 @@
 # npm release procedure
 
-The target release set is version `1.0.7`: `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. The workspace root stays private. Follow this procedure for subsequent releases and replace the example version and tarball names consistently. Until publication is verified, the npm registry remains authoritative for the currently public version.
+The current published release set is version `1.0.7`: `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. The workspace root stays private. Follow this procedure for subsequent releases and replace the example version and tarball names consistently. The npm registry remains authoritative for the currently public version.
 
 ## Prepare and review
 

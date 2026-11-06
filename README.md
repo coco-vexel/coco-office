@@ -6,9 +6,9 @@ query, modify and export DOCX, XLSX and PPTX locally using JavaScript.
 [中文说明](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) ·
 [Release review](docs/open-source-readiness.md)
 
-The project is open source and the three packages are prepared as release
-candidate `1.0.7`. Treat the npm registry as authoritative for the currently
-published version. See [LICENSING.md](LICENSING.md) for license scope.
+The project is open source and all three packages are published at `1.0.7`.
+Treat the npm registry as authoritative for the currently published version.
+See [LICENSING.md](LICENSING.md) for license scope.
 
 ## Packages
 
