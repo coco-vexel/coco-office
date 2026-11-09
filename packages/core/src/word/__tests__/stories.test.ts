@@ -190,13 +190,41 @@ describe('listStories — kinds 过滤', () => {
 });
 
 describe('getStoryParagraphs', () => {
-  test('body story 返回 <w:body> 下所有 <w:p>', () => {
+  test('body story 返回 <w:body> 下普通文本流的 <w:p>', () => {
     const pkg = createPackage();
     putXml(pkg, 'word/document.xml', DOC_XML, CT.body);
     const [body] = listStories(pkg);
     const ps = getStoryParagraphs(body!);
     expect(ps).toHaveLength(2);
     expect(ps[0]?.localName).toBe('p');
+  });
+
+  test('排除 w:txbxContent 内段落,但保留表格单元格段落', () => {
+    const pkg = createPackage();
+    putXml(
+      pkg,
+      'word/document.xml',
+      `<w:document xmlns:w="${W_NS}">
+        <w:body>
+          <w:p>
+            <w:r><w:t>正文</w:t></w:r>
+            <w:r><w:drawing><w:txbxContent>
+              <w:p><w:r><w:t>标题</w:t></w:r></w:p>
+            </w:txbxContent></w:drawing></w:r>
+          </w:p>
+          <w:tbl><w:tr><w:tc>
+            <w:p><w:r><w:t>单元格</w:t></w:r></w:p>
+          </w:tc></w:tr></w:tbl>
+        </w:body>
+      </w:document>`,
+      CT.body,
+    );
+
+    const [body] = listStories(pkg, { kinds: ['body'] });
+    const ps = getStoryParagraphs(body!);
+
+    expect(ps).toHaveLength(2);
+    expect(ps.map((p) => p.textContent.replace(/\s/g, ''))).toEqual(['正文标题', '单元格']);
   });
 
   test('footnote story 只返回该 <w:footnote> 内的段落(不跨 sub-story)', () => {

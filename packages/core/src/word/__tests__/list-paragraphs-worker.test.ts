@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import JSZip from 'jszip';
 import { WordDocument } from '../word-document.js';
 import { WordError } from '../word-error.js';
-import { W14_NS, W_NS } from '../namespaces.js';
+import { A_NS, W14_NS, WP_NS, WPS_NS, W_NS } from '../namespaces.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '../../../../..');
@@ -44,11 +44,33 @@ function buildDocXml(paraCount: number): string {
 </w:document>`;
 }
 
-async function makeFixtureZip(paraCount: number): Promise<Uint8Array> {
+function buildTextBoxDocXml(): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}" xmlns:a="${A_NS}"
+  xmlns:wp="${WP_NS}" xmlns:wps="${WPS_NS}">
+  <w:body>
+    <w:p w14:paraId="AAAA0001">
+      <w:r><w:t>正文</w:t></w:r>
+      <w:r><w:drawing><wp:inline><wp:extent cx="1000000" cy="500000"/>
+        <a:graphic><a:graphicData uri="${WPS_NS}"><wps:wsp><wps:txbx>
+          <w:txbxContent>
+            <w:p w14:paraId="BBBB0002"><w:r><w:t>标题</w:t></w:r></w:p>
+          </w:txbxContent>
+        </wps:txbx></wps:wsp></a:graphicData></a:graphic>
+      </wp:inline></w:drawing></w:r>
+    </w:p>
+    <w:tbl><w:tr><w:tc>
+      <w:p w14:paraId="CCCC0003"><w:r><w:t>单元格</w:t></w:r></w:p>
+    </w:tc></w:tr></w:tbl>
+  </w:body>
+</w:document>`;
+}
+
+async function makeFixtureZip(paraCount: number, documentXml?: string): Promise<Uint8Array> {
   const zip = new JSZip();
   zip.file('[Content_Types].xml', CT_XML);
   zip.file('_rels/.rels', MAIN_RELS);
-  zip.file('word/document.xml', buildDocXml(paraCount));
+  zip.file('word/document.xml', documentXml ?? buildDocXml(paraCount));
   return zip.generateAsync({ type: 'uint8array' });
 }
 
@@ -100,6 +122,33 @@ describe('listParagraphs —— worker 模式端到端 (#24)', () => {
         await Promise.all(rw.paragraphs.map((p) => p.getText())),
       );
       expect(ri.pagination).toEqual(rw.pagination);
+
+      await docInline.dispose();
+      await docWorker.dispose();
+    },
+    WORKER_TEST_TIMEOUT,
+  );
+
+  test(
+    'inline 与 worker 均排除文本框段落并保留表格单元格段落',
+    async () => {
+      const buf = await makeFixtureZip(0, buildTextBoxDocXml());
+      const docInline = await WordDocument.fromZip(buf, { docId: 'lp-txbx-i', mode: 'inline' });
+      const docWorker = await WordDocument.fromZip(buf, { docId: 'lp-txbx-w', mode: 'worker' });
+
+      const ri = await docInline.paragraphs.list({ scope: 'body', pagination: { mode: 'all' } });
+      const rw = await docWorker.paragraphs.list({ scope: 'body', pagination: { mode: 'all' } });
+      const inlineTexts = await Promise.all(ri.paragraphs.map((p) => p.getText()));
+      const workerTexts = await Promise.all(rw.paragraphs.map((p) => p.getText()));
+
+      expect(inlineTexts).toEqual(['正文', '单元格']);
+      expect(workerTexts).toEqual(inlineTexts);
+      expect(rw.pagination).toEqual(ri.pagination);
+
+      const inlineTextBoxes = await docInline.drawings.listTextBoxes();
+      const workerTextBoxes = await docWorker.drawings.listTextBoxes();
+      expect(inlineTextBoxes.map((drawing) => drawing.innerText)).toEqual(['标题']);
+      expect(workerTextBoxes.map((drawing) => drawing.innerText)).toEqual(['标题']);
 
       await docInline.dispose();
       await docWorker.dispose();

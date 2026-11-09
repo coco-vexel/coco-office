@@ -166,12 +166,31 @@ export function listStories(pkg: Package, opts: ListStoriesOptions = {}): Story[
 /**
  * 取 story 根下的所有 <w:p> 元素。
  *
- * - body / header / footer:story root 整个子树的 w:p
- * - footnote / endnote / comment:单个 sub-story root 下的 w:p(不跨 sub-story)
+ * - body / header / footer:story root 子树中的普通文本流 w:p
+ * - footnote / endnote / comment:单个 sub-story root 下的普通文本流 w:p(不跨 sub-story)
+ * - 所有 story 均排除 `w:txbxContent` 内的段落;文本框由 drawings API 单独枚举
+ * - 表格单元格内的段落仍属于所在 story,保留在结果中
  */
 export function getStoryParagraphs(story: Story): Element[] {
   // 使用 getElementsByTagNameNS 枚举 —— 根元素调用时只返回该子树下的匹配
-  return snapshot(story.root.getElementsByTagNameNS(W_NS, 'p'));
+  return snapshot(story.root.getElementsByTagNameNS(W_NS, 'p')).filter(
+    (paragraph) => !hasTextBoxContentAncestor(paragraph, story.root),
+  );
+}
+
+/**
+ * 判断段落是否归属于嵌入式文本框。
+ *
+ * `getElementsByTagNameNS` 必须保留为大文档的快速枚举路径;这里只沿祖先链做一次
+ * O(depth) 检查,避免使用慢 XPath,同时不会误排除 `<w:tc>` 内的普通段落。
+ */
+function hasTextBoxContentAncestor(paragraph: Element, storyRoot: Element): boolean {
+  let ancestor = paragraph.parentElement;
+  while (ancestor && ancestor !== storyRoot) {
+    if (ancestor.namespaceURI === W_NS && ancestor.localName === 'txbxContent') return true;
+    ancestor = ancestor.parentElement;
+  }
+  return false;
 }
 
 /**
