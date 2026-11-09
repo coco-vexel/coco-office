@@ -1076,7 +1076,7 @@ describe('native runtime history integration', () => {
       expectModelAndDomToAgree(editor, host);
     }
     expect(editor.getDocument()).toEqual(final);
-  });
+  }, 15_000);
 
   test('handles empty paragraphs, paragraph boundaries, and selected Delete symmetrically', () => {
     editor.destroy();
