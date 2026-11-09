@@ -2,6 +2,13 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.8] - 2026-11-09
+
+### Fixed
+
+- Excluded text-box story paragraphs from the main Word document-body paragraph
+  listing while preserving explicit text-box story access.
+
 ## [1.0.7] - 2026-11-06
 
 ### Added
@@ -98,6 +105,7 @@ All notable changes to Coco Office are documented in this file.
 
 - Initial open-source release of Core, Editor and OOJSON packages.
 
+[1.0.8]: https://github.com/coco-vexel/coco-office/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/coco-vexel/coco-office/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/coco-vexel/coco-office/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/coco-vexel/coco-office/compare/v1.0.4...v1.0.5
