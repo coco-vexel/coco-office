@@ -139,6 +139,37 @@ const HEADER_SDT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   </w:p>
 </w:hdr>`;
 
+const BODY_BLOCK_SDT_DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}">
+  <w:body>
+    <w:sdt>
+      <w:sdtPr><w:tag w:val="bank_notice_layout:v1:head"/></w:sdtPr>
+      <w:sdtContent>
+        <w:p w14:paraId="A0000001">
+          <w:pPr><w:jc w:val="center"/><w:spacing w:after="320"/></w:pPr>
+          <w:r><w:rPr><w:rFonts w:eastAsia="方正小标宋简体"/><w:color w:val="FF0000"/><w:sz w:val="84"/></w:rPr><w:t>××银行文件</w:t></w:r>
+        </w:p>
+        <w:sdt>
+          <w:sdtContent>
+            <w:p w14:paraId="A0000002">
+              <w:pPr><w:pBdr><w:bottom w:val="single" w:sz="16" w:color="FF0000" w:space="8"/></w:pBdr></w:pPr>
+            </w:p>
+          </w:sdtContent>
+        </w:sdt>
+        <w:tbl>
+          <w:tr><w:tc>
+            <w:sdt><w:sdtContent>
+              <w:p w14:paraId="A0000003"><w:r><w:t>SDT内表格</w:t></w:r></w:p>
+            </w:sdtContent></w:sdt>
+          </w:tc></w:tr>
+        </w:tbl>
+      </w:sdtContent>
+    </w:sdt>
+    <w:p w14:paraId="A0000004"><w:r><w:t>正文标题</w:t></w:r></w:p>
+    <w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>
+  </w:body>
+</w:document>`;
+
 const TEMPLATE_FIELD_TEXT_BOX_DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}"
   xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -207,6 +238,59 @@ const VML_LINE_DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="
     </w:p>
   </w:body>
 </w:document>`;
+
+const ALTERNATE_CONTENT_LINE_DOCUMENT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="${W_NS}" xmlns:w14="${W14_NS}"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+  xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+  xmlns:v="urn:schemas-microsoft-com:vml">
+  <w:body>
+    <w:p w14:paraId="DUALLINE">
+      <w:r>
+        <mc:AlternateContent>
+          <mc:Choice Requires="wps">
+            <w:drawing>
+              <wp:anchor behindDoc="0">
+                <wp:extent cx="5648400" cy="720"/>
+                <wp:wrapNone/>
+                <a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+                  <wps:wsp>
+                    <wps:cNvCnPr/>
+                    <wps:spPr>
+                      <a:prstGeom prst="line"><a:avLst/></a:prstGeom>
+                      <a:noFill/>
+                      <a:ln w="25400"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln>
+                    </wps:spPr>
+                  </wps:wsp>
+                </a:graphicData></a:graphic>
+              </wp:anchor>
+            </w:drawing>
+          </mc:Choice>
+          <mc:Fallback>
+            <w:pict>
+              <v:line style="height:0.05pt;width:444.75pt" stroked="t">
+                <v:stroke weight="2pt" color="#FF0000"/>
+              </v:line>
+            </w:pict>
+          </mc:Fallback>
+        </mc:AlternateContent>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>`;
+
+const EXPANDED_GFXDATA_LINE_DOCUMENT_XML = ALTERNATE_CONTENT_LINE_DOCUMENT_XML
+  .replace(
+    /<mc:AlternateContent>[\s\S]*?<mc:Choice Requires="wps">([\s\S]*?<w:drawing>[\s\S]*?<\/w:drawing>)[\s\S]*?<mc:Fallback>[\s\S]*?<w:pict>([\s\S]*?<v:line)/,
+    '$1<w:pict>$2',
+  )
+  .replace(
+    '<v:line style=',
+    '<v:line xmlns:o="urn:schemas-microsoft-com:office:office" o:gfxdata="embedded-modern-shape" style=',
+  )
+  .replace('</mc:Fallback>\n        </mc:AlternateContent>', '');
 
 const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="${W_NS}">
@@ -825,6 +909,56 @@ describe('@coco-vexel/coco-office-editor word spike', () => {
     );
   });
 
+  test('flattens nested body and table-cell SDTs without losing red-head formatting', async () => {
+    const pkg = await fromZip(
+      await makeTemplateFieldTextBoxFixtureZip(BODY_BLOCK_SDT_DOCUMENT_XML),
+    );
+    const view = buildWordEditorViewFromPackage(pkg, buildIndices(pkg));
+
+    expect(view.blocks.map((block) => ('tableId' in block ? 'table' : 'paragraph'))).toEqual([
+      'paragraph',
+      'paragraph',
+      'table',
+      'paragraph',
+    ]);
+    expect(view.paragraphs.map((paragraph) => paragraph.text)).toEqual([
+      '××银行文件',
+      '',
+      'SDT内表格',
+      '正文标题',
+    ]);
+    expect(view.paragraphs[0]).toMatchObject({
+      paraId: 'A0000001',
+      format: {
+        alignment: 'center',
+        fontFamily: '方正小标宋简体',
+        fontSize: 42,
+        color: 'FF0000',
+      },
+      segments: [
+        expect.objectContaining({
+          kind: 'text',
+          text: '××银行文件',
+          format: expect.objectContaining({ fontSize: 42, color: 'FF0000' }),
+        }),
+      ],
+    });
+    expect(view.paragraphs[1]!.format?.borderBottom).toEqual({
+      val: 'single',
+      color: 'FF0000',
+      size: 16,
+      space: 8,
+    });
+    expect(view.tables[0]!.rows[0]!.cells[0]).toMatchObject({
+      text: 'SDT内表格',
+      paragraphs: [expect.objectContaining({ paraId: 'A0000003', text: 'SDT内表格' })],
+    });
+    expect(view.sections[0]).toMatchObject({
+      firstParaId: 'A0000001',
+      lastParaId: 'A0000004',
+    });
+  });
+
   test('extracts legacy VML horizontal lines with their size and stroke', async () => {
     const pkg = await fromZip(await makeTemplateFieldTextBoxFixtureZip(VML_LINE_DOCUMENT_XML));
     const view = buildWordEditorViewFromPackage(pkg, buildIndices(pkg));
@@ -849,6 +983,44 @@ describe('@coco-vexel/coco-office-editor word spike', () => {
     expect(line.width).toBeCloseTo(593, 5);
     expect(line.height).toBeCloseTo(0.0666667, 5);
     expect(line.strokeWidth).toBeCloseTo(2.6666667, 5);
+  });
+
+  test('uses the DrawingML choice instead of also rendering its VML line fallback', async () => {
+    const pkg = await fromZip(
+      await makeTemplateFieldTextBoxFixtureZip(ALTERNATE_CONTENT_LINE_DOCUMENT_XML),
+    );
+    const view = buildWordEditorViewFromPackage(pkg, buildIndices(pkg));
+
+    expect(view.paragraphs[0]!.segments).toHaveLength(1);
+    const line = view.paragraphs[0]!.segments[0];
+    expect(line).toMatchObject({
+      kind: 'drawing',
+      drawingId: 'dr-0001',
+      drawingKind: 'shape',
+      isLineOrConnector: true,
+      hasBorder: true,
+      strokeColor: '#FF0000',
+    });
+    if (line?.kind !== 'drawing') throw new Error('DrawingML line was not projected as a drawing');
+    expect(line.width).toBeCloseTo(593, 0);
+    expect(line.strokeWidth).toBeCloseTo(2.6666667, 5);
+  });
+
+  test('deduplicates a VML gfxdata line after Flat OPC expands its modern sibling', async () => {
+    const pkg = await fromZip(
+      await makeTemplateFieldTextBoxFixtureZip(EXPANDED_GFXDATA_LINE_DOCUMENT_XML),
+    );
+    const view = buildWordEditorViewFromPackage(pkg, buildIndices(pkg));
+
+    const lines = view.paragraphs[0]!.segments.filter(
+      (segment) => segment.kind === 'drawing' && segment.isLineOrConnector,
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      drawingId: 'dr-0001',
+      strokeColor: '#FF0000',
+      strokeWidth: expect.closeTo(2.6666667, 5),
+    });
   });
 
   test('applies docDefaults, default paragraph style and direct paragraph formatting in order', async () => {

@@ -2350,7 +2350,9 @@ function renderNativeDrawing(child: NativeWordDrawingNode): HTMLElement {
   if (child.anchoringMode) drawing.dataset.anchoringMode = child.anchoringMode;
   if (child.wrap) drawing.dataset.wrap = child.wrap;
   drawing.classList.add(`is-${child.drawingKind.toLowerCase()}`);
-  if (child.hasBorder) drawing.classList.add('has-border');
+  // A line's stroke is its border in OOXML, but it is not a box border. Applying
+  // the generic class as well can paint an extra edge beside the resolved stroke.
+  if (child.hasBorder && !child.isLineOrConnector) drawing.classList.add('has-border');
   if (child.hasFill) drawing.classList.add('has-fill');
   if (child.isLineOrConnector) {
     drawing.classList.add('is-line-or-connector');

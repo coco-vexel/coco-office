@@ -50,6 +50,8 @@ import type {
 const R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 const RELS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const A_NS = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+const MC_NS = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+const O_NS = 'urn:schemas-microsoft-com:office:office';
 const VML_NS = 'urn:schemas-microsoft-com:vml';
 const DEFAULT_TABLE_LOOK: Required<Pick<
   EditorTableLook,
@@ -144,6 +146,7 @@ export function buildWordEditorViewFromPackage(
       attachedCommentIds,
       tableIdByElement,
       tableInfoById,
+      flattenSdt: true,
     });
     blocks.push(...storyView.blocks);
     paragraphs.push(...storyView.paragraphs);
@@ -339,12 +342,7 @@ function extractSectionsFromBody(pkg: Package): EditorSectionView[] {
   let lastParaId: string | undefined;
   let blockIndex = 0;
 
-  for (let i = 0; i < story.root.childNodes.length; i++) {
-    const child = story.root.childNodes[i];
-    if (!child || child.nodeType !== 1) continue;
-    const el = child as Element;
-    if (el.namespaceURI !== W_NS) continue;
-
+  for (const el of collectStoryBlockElements(story.root)) {
     if (el.localName === 'p') {
       const paraId = paragraphIdWithFallback('body', el, blockIndex++);
       if (!firstParaId) firstParaId = paraId;
@@ -361,11 +359,12 @@ function extractSectionsFromBody(pkg: Package): EditorSectionView[] {
       blockIndex++;
       continue;
     }
-
-    if (el.localName === 'sectPr' && firstParaId && lastParaId) {
-      sections.push(buildFallbackSection(sections.length, firstParaId, lastParaId, el, pkg, relsPath));
-      firstParaId = undefined;
-    }
+  }
+  const finalSectPr = firstDirectChild(story.root, W_NS, 'sectPr');
+  if (finalSectPr && firstParaId && lastParaId) {
+    sections.push(
+      buildFallbackSection(sections.length, firstParaId, lastParaId, finalSectPr, pkg, relsPath),
+    );
   }
 
   return sections;
@@ -754,8 +753,11 @@ function buildEditorTable(
             paragraphs.length > 0
               ? paragraphs
               : buildFallbackCellParagraphs(info.tableId, rowIndex, cellIndex, cell.text);
+          const projectedCellText =
+            cell.text ||
+            (cellBlocks?.directParagraphs.map((paragraph) => paragraph.text).join('\n') ?? '');
           const view: EditorTableCellView = {
-            text: cell.text,
+            text: projectedCellText,
             gridSpan: cell.gridSpan,
             vMerge: cell.vMerge,
             blocks: cellBlocks?.blocks.length ? cellBlocks.blocks : fallbackParagraphs,
@@ -825,7 +827,7 @@ function buildEditorCellBlocks(cellEl: Element, options: BuildEditorCellBlocksOp
   const blocks: EditorBlockView[] = [];
   const paragraphs: EditorParagraphView[] = [];
   const directParagraphs: EditorParagraphView[] = [];
-  const elements = directBlockElements(cellEl);
+  const elements = collectStoryBlockElements(cellEl, options.suppressPlaceholderSdtContent);
   for (let index = 0; index < elements.length; index += 1) {
     const el = elements[index]!;
     if (el.localName === 'p') {
@@ -1521,6 +1523,8 @@ function extractParagraphContent(
 
   function appendDrawing(source: Element): void {
     if (source.namespaceURI === W_NS && source.localName === 'pict') {
+      if (isDrawingFallbackForSupportedChoice(source)) return;
+      if (isExpandedGfxdataLineDuplicate(source, paragraph, paraId, context)) return;
       const vmlLine = buildVmlLineSegment(source, paraId, vmlDrawingIndex);
       if (!vmlLine) return;
       if (consumedVmlDrawings.has(source)) return;
@@ -1601,6 +1605,14 @@ function extractParagraphContent(
     if (drawing.hasBorder !== undefined) segment.hasBorder = drawing.hasBorder;
     if (drawing.hasFill !== undefined) segment.hasFill = drawing.hasFill;
     if (drawing.isLineOrConnector !== undefined) segment.isLineOrConnector = drawing.isLineOrConnector;
+    if (drawing.isLineOrConnector) {
+      const stroke = drawingLineStroke(
+        context.indices.drawingIdx.get(drawing.drawingId),
+        context.theme,
+      );
+      if (stroke.color) segment.strokeColor = stroke.color;
+      if (stroke.width !== undefined) segment.strokeWidth = stroke.width;
+    }
     if (drawing.innerTextAlign !== undefined) segment.innerTextAlign = drawing.innerTextAlign;
     const innerParagraphs = buildDrawingInnerParagraphs(drawing, context);
     if (innerParagraphs.length > 0) segment.paragraphs = innerParagraphs;
@@ -2998,6 +3010,95 @@ function directDrawingChildren(el: Element): Element[] {
     }
   }
   return drawings;
+}
+
+/**
+ * OOXML AlternateContent is a choice, not a stack: readers that understand the
+ * DrawingML choice must not also project the legacy VML fallback.
+ */
+function isDrawingFallbackForSupportedChoice(source: Element): boolean {
+  let fallback: Element | null = source.parentElement;
+  while (fallback && !(fallback.namespaceURI === MC_NS && fallback.localName === 'Fallback')) {
+    fallback = fallback.parentElement;
+  }
+  const alternateContent = fallback?.parentElement;
+  if (
+    !alternateContent ||
+    alternateContent.namespaceURI !== MC_NS ||
+    alternateContent.localName !== 'AlternateContent'
+  ) {
+    return false;
+  }
+
+  for (let i = 0; i < alternateContent.childNodes.length; i += 1) {
+    const child = alternateContent.childNodes[i];
+    if (
+      child?.nodeType !== 1 ||
+      (child as Element).namespaceURI !== MC_NS ||
+      (child as Element).localName !== 'Choice'
+    ) {
+      continue;
+    }
+    if ((child as Element).getElementsByTagNameNS(W_NS, 'drawing').length > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Some Flat OPC producers expand a VML line's o:gfxdata payload into a sibling
+ * w:drawing while retaining the original pict. Keep the VML form for direct DOCX
+ * reads, and suppress it only when its expanded modern line is actually present.
+ */
+function isExpandedGfxdataLineDuplicate(
+  source: Element,
+  paragraph: Element,
+  paraId: string,
+  context: ExtractContext,
+): boolean {
+  const vmlLine = source.getElementsByTagNameNS(VML_NS, 'line')[0];
+  if (!vmlLine || !vmlLine.hasAttributeNS(O_NS, 'gfxdata')) return false;
+
+  const modernLineIds = new Set<string>();
+  const descendants = paragraph.getElementsByTagNameNS(W_NS, 'drawing');
+  for (let i = 0; i < descendants.length; i += 1) {
+    const drawingId = context.drawingIdByElement.get(descendants[i]!);
+    if (drawingId) modernLineIds.add(drawingId);
+  }
+  for (const drawing of context.drawingsByAnchorParaId.get(paraId) ?? []) {
+    modernLineIds.add(drawing.drawingId);
+  }
+  for (const drawingId of modernLineIds) {
+    if (context.drawingInfoById.get(drawingId)?.isLineOrConnector) return true;
+  }
+  return false;
+}
+
+function drawingLineStroke(
+  source: Element | undefined,
+  theme: EditorTheme,
+): { color?: string; width?: number } {
+  const line = source?.getElementsByTagNameNS(A_NS, 'ln')[0];
+  if (!line) return {};
+
+  const widthEmu = Number(line.getAttribute('w'));
+  const width = Number.isFinite(widthEmu) && widthEmu > 0
+    ? (widthEmu / 914400) * 96
+    : undefined;
+  const solidFill = firstDirectChild(line, A_NS, 'solidFill');
+  let color: string | undefined;
+  if (solidFill) {
+    const srgb = firstDirectChild(solidFill, A_NS, 'srgbClr');
+    const scheme = firstDirectChild(solidFill, A_NS, 'schemeClr');
+    const system = firstDirectChild(solidFill, A_NS, 'sysClr');
+    color = normalizeRgbColor(srgb?.getAttribute('val'));
+    color ??= themeColor(theme, scheme?.getAttribute('val') ?? null);
+    color ??= normalizeRgbColor(system?.getAttribute('lastClr'));
+  }
+
+  return {
+    ...(color ? { color: `#${color}` } : {}),
+    ...(width !== undefined ? { width } : {}),
+  };
 }
 
 function buildVmlLineSegment(

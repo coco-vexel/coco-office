@@ -201,6 +201,55 @@ describe('native runtime history integration', () => {
     host.remove();
   });
 
+  test('renders line strokes without also applying the generic shape border', () => {
+    editor.destroy();
+    const line = paragraph('LINE', '\uFFFC');
+    line.segments = [{
+      kind: 'drawing',
+      from: 0,
+      to: 1,
+      drawingId: 'vml-line-1',
+      drawingKind: 'shape',
+      width: 593,
+      height: 0.0666667,
+      isLineOrConnector: true,
+      hasBorder: true,
+      strokeColor: '#FF0000',
+      strokeWidth: 2.6666667,
+    }];
+    const borderedShape = paragraph('SHAPE', '\uFFFC');
+    borderedShape.segments = [{
+      kind: 'drawing',
+      from: 0,
+      to: 1,
+      drawingId: 'shape-1',
+      drawingKind: 'shape',
+      width: 120,
+      height: 60,
+      hasBorder: true,
+    }];
+
+    editor = renderNativeWordEditor(host, {
+      ...viewFixture(),
+      blocks: [line, borderedShape],
+    }, { styleIsolation: 'none' });
+
+    const lineElement = host.querySelector<HTMLElement>(
+      'coco-word-native-drawing[data-drawing-id="vml-line-1"]',
+    );
+    expect(lineElement).not.toBeNull();
+    expect(lineElement?.classList.contains('is-line-or-connector')).toBe(true);
+    expect(lineElement?.classList.contains('has-border')).toBe(false);
+    expect(lineElement?.style.borderTopStyle).toBe('solid');
+    expect(lineElement?.style.borderTopColor).toBe('#FF0000');
+    expect(Number.parseFloat(lineElement?.style.borderTopWidth ?? '')).toBeCloseTo(2.6666667, 5);
+
+    const shapeElement = host.querySelector<HTMLElement>(
+      'coco-word-native-drawing[data-drawing-id="shape-1"]',
+    );
+    expect(shapeElement?.classList.contains('has-border')).toBe(true);
+  });
+
   test('keeps selection available while blocking every mutation in read-only mode', () => {
     editor.setReadOnly(true);
     const before = editor.getDocument().blocks;
