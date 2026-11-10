@@ -3,7 +3,7 @@
 面向浏览器和 Node.js 的 Office 文档 SDK，以及实验性的 Word、Excel、PPT
 浏览器编辑器。文档在本地读取、修改和导出，不要求安装 Office。
 
-当前已发布版本为 `v1.0.7`。Core、Editor、OOJSON 及三份自制 Excel
+当前发布候选版本为 `v1.0.9`，已发布版本为 `v1.0.8`。Core、Editor、OOJSON 及三份自制 Excel
 测试样例采用 Apache-2.0，具体范围见 [LICENSING.md](LICENSING.md)。
 
 ## 本地运行
@@ -42,5 +42,6 @@ corepack pnpm demo
 不要在公开 Issue 中附加客户文档、凭证或未披露漏洞。社区参与须遵守
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 
-三个库的 `1.0.7` 版本已发布到 npm；当前公开版本以 registry 记录为准。
+三个库的 `1.0.9` 版本已完成本地发布准备；npm 当前公开版本为
+`1.0.8`，最终以 registry 记录为准。
 详见[功能与运行环境核对](docs/runtime-and-demos.md)、[OOJSON 说明](packages/oojson/README.md)和[npm 发布流程](docs/npm-release.md)。Demo 首页包含 OOJSON 转换页入口。

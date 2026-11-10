@@ -2,6 +2,15 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.9] - 2026-11-10
+
+### Fixed
+
+- Preserved nested Word content controls, including red-head document titles,
+  separator formatting and table-cell content, in the native editor view.
+- Rendered DrawingML/VML fallback lines once and avoided applying a second
+  generic shape border that appeared as an extra dark line.
+
 ## [1.0.8] - 2026-11-09
 
 ### Fixed
@@ -105,6 +114,7 @@ All notable changes to Coco Office are documented in this file.
 
 - Initial open-source release of Core, Editor and OOJSON packages.
 
+[1.0.9]: https://github.com/coco-vexel/coco-office/compare/v1.0.8...v1.0.9
 [1.0.8]: https://github.com/coco-vexel/coco-office/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/coco-vexel/coco-office/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/coco-vexel/coco-office/compare/v1.0.5...v1.0.6
