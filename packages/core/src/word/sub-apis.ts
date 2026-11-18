@@ -192,6 +192,11 @@ export interface Paragraph extends ParagraphInfo {
     value: NonNullable<ParagraphDirectFormat['alignment']>,
     opts?: LiveObjectWriteOptions,
   ): Promise<ApplyResult>;
+  /** Replaces direct paragraph tab stops. Positions are measured in twips. */
+  setTabs(
+    value: NonNullable<ParagraphDirectFormat['tabs']>,
+    opts?: LiveObjectWriteOptions,
+  ): Promise<ApplyResult>;
   /**
    * Sets paragraph outline level. Values 0-8 correspond to heading levels 1-9.
    */
@@ -1044,6 +1049,13 @@ class LiveParagraph implements Paragraph {
     opts: LiveObjectWriteOptions = {},
   ): Promise<ApplyResult> {
     return this.applyParagraphFormat({ alignment: value }, opts);
+  }
+
+  setTabs(
+    value: NonNullable<ParagraphDirectFormat['tabs']>,
+    opts: LiveObjectWriteOptions = {},
+  ): Promise<ApplyResult> {
+    return this.applyParagraphFormat({ tabs: value }, opts);
   }
 
   setOutlineLevel(value: number, opts: LiveObjectWriteOptions = {}): Promise<ApplyResult> {

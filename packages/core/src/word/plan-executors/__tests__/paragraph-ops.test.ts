@@ -20,7 +20,11 @@ import { W_NS, W14_NS, WPS_NS, VML_NS } from '../../namespaces.js';
 import type { ApplyResult, Op } from '../../plan.js';
 import { WordError } from '../../word-error.js';
 import type { ExecutorContext } from '../executor-context.js';
-import { executeReplaceParagraph, executeReplaceTextInParagraph } from '../paragraph-ops.js';
+import {
+  executeFormatParagraph,
+  executeReplaceParagraph,
+  executeReplaceTextInParagraph,
+} from '../paragraph-ops.js';
 
 const DOC_CTYPE =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml';
@@ -163,6 +167,35 @@ describe('executeReplaceParagraph', () => {
   });
 
   // trackChanges=true 的覆盖由 trackChanges.test.ts 统一做(#31 已实现包装层)
+});
+
+describe('executeFormatParagraph tab stops', () => {
+  test('writes an underscore-leader tab and replaces existing direct tabs', () => {
+    const { pkg, ctx } = makeDoc(
+      `<w:p w14:paraId="AAAAAAA1"><w:pPr><w:tabs><w:tab w:val="right" w:pos="3000"/></w:tabs></w:pPr><w:r><w:t>题目：</w:t><w:tab/></w:r></w:p>`,
+    );
+    executeFormatParagraph(ctx, {
+      type: 'formatParagraph',
+      paraId: 'AAAAAAA1',
+      format: { tabs: [{ position: 7200, alignment: 'left', leader: 'underscore' }] },
+    });
+    const xml = paraXml(pkg, 'AAAAAAA1');
+    expect(xml.match(/<w:tabs/g)).toHaveLength(1);
+    expect(xml).toMatch(/<w:tab\s+w:val="left"\s+w:pos="7200"\s+w:leader="underscore"\s*\/>/);
+    expect(xml).not.toContain('w:pos="3000"');
+  });
+
+  test('an empty array removes direct tab stops', () => {
+    const { pkg, ctx } = makeDoc(
+      `<w:p w14:paraId="AAAAAAA1"><w:pPr><w:tabs><w:tab w:val="left" w:pos="3000"/></w:tabs></w:pPr><w:r><w:t>x</w:t></w:r></w:p>`,
+    );
+    executeFormatParagraph(ctx, {
+      type: 'formatParagraph',
+      paraId: 'AAAAAAA1',
+      format: { tabs: [] },
+    });
+    expect(paraXml(pkg, 'AAAAAAA1')).not.toContain('<w:tabs');
+  });
 });
 
 // ─────────── replaceTextInParagraph ───────────

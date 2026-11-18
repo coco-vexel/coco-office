@@ -2281,6 +2281,12 @@ function renderTabStopRow(paragraph: NativeWordParagraphNode): HTMLElement | nul
   const rightTab = tabStops.find((stop) => stop.alignment === 'right');
   if (!rightTab) return null;
   const hasLeader = rightTab.leader !== undefined && rightTab.leader !== 'none';
+  const hasUnderlinedTab =
+    tabCount === 1 &&
+    !hasLeader &&
+    paragraph.content.some(
+      (child) => child.kind === 'text' && child.format?.underline === true && child.text.includes('\t'),
+    );
   const textParts = paragraphTabTextParts(paragraph);
   if (!hasLeader && !isCompactTabStopLayout(textParts)) return null;
 
@@ -2291,20 +2297,39 @@ function renderTabStopRow(paragraph: NativeWordParagraphNode): HTMLElement | nul
     row.classList.add(`has-leader-${rightTab.leader}`);
     row.dataset.tabLeader = rightTab.leader;
   }
+  if (hasUnderlinedTab) row.classList.add('has-underlined-tab');
   const segments = Array.from({ length: tabCount + 1 }, (_, index) => {
     const segment = document.createElement('span');
     segment.className = `coco-word-tab-segment is-segment-${index}`;
     return segment;
   });
   let targetIndex = 0;
+  const lastUnderlinedRunBySegment: Array<HTMLElement | undefined> = Array.from({
+    length: segments.length,
+  });
 
   for (const child of paragraph.content) {
     if (child.kind !== 'text') continue;
     const parts = child.text.split('\t');
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i] ?? '';
-      if (part.length > 0) segments[targetIndex]?.appendChild(renderNativeText({ ...child, text: part }));
-      if (i < parts.length - 1) targetIndex = Math.min(targetIndex + 1, segments.length - 1);
+      let renderedElement: HTMLElement | undefined;
+      if (part.length > 0) {
+        const rendered = renderNativeText({ ...child, text: part });
+        if (rendered instanceof HTMLElement) renderedElement = rendered;
+        if (child.format?.underline === true && renderedElement) {
+          lastUnderlinedRunBySegment[targetIndex] = renderedElement;
+        }
+        segments[targetIndex]?.appendChild(rendered);
+      }
+      if (i < parts.length - 1) {
+        if (hasUnderlinedTab && child.format?.underline === true) {
+          (renderedElement ?? lastUnderlinedRunBySegment[targetIndex])?.classList.add(
+            'coco-word-underlined-tab-run',
+          );
+        }
+        targetIndex = Math.min(targetIndex + 1, segments.length - 1);
+      }
     }
   }
 

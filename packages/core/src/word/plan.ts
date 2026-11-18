@@ -60,6 +60,15 @@ export type RevisionScope =
 
 export interface ParagraphDirectFormat {
   alignment?: 'left' | 'center' | 'right' | 'both' | 'distribute';
+  /**
+   * Replaces the paragraph's direct tab-stop definitions. Positions are twips
+   * from the text area's left edge. An empty array removes direct tab stops.
+   */
+  tabs?: Array<{
+    position: number;
+    alignment?: 'left' | 'center' | 'right' | 'decimal' | 'bar' | 'clear';
+    leader?: 'none' | 'dot' | 'hyphen' | 'underscore' | 'heavy' | 'middleDot';
+  }>;
   outlineLevel?: number;
   pageBreakBefore?: boolean;
   indent?: {

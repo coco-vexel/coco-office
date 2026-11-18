@@ -157,6 +157,7 @@ describe('WordPlan builder —— 链式返回 + op push', () => {
       pageBreakBefore: true,
       indent: { left: 720, right: 120, firstLine: 360 },
       spacing: { before: 120, after: 240, line: 360, lineRule: 'exact' },
+      tabs: [{ position: 7200, alignment: 'left', leader: 'underscore' }],
     });
     const op = plan.ops[0] as Extract<(typeof plan.ops)[number], { type: 'formatParagraph' }>;
     expect(returned).toBe(plan);
@@ -169,6 +170,7 @@ describe('WordPlan builder —— 链式返回 + op push', () => {
         pageBreakBefore: true,
         indent: { left: 720, right: 120, firstLine: 360 },
         spacing: { before: 120, after: 240, line: 360, lineRule: 'exact' },
+        tabs: [{ position: 7200, alignment: 'left', leader: 'underscore' }],
       },
     });
     await doc.dispose();

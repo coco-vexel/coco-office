@@ -350,6 +350,23 @@ export function executeFormatParagraph(
     pPr.insertBefore(jc, findPPrInsertRef(pPr, JC_AFTER_LOCALS));
   }
 
+  if (op.format.tabs !== undefined) {
+    removeDirectChildrenW(pPr, 'tabs');
+    if (op.format.tabs.length > 0) {
+      const tabs = createW(pPr.ownerDocument!, 'tabs');
+      for (const item of op.format.tabs) {
+        const tab = createW(pPr.ownerDocument!, 'tab');
+        tab.setAttributeNS(W_NS, 'w:val', item.alignment ?? 'left');
+        tab.setAttributeNS(W_NS, 'w:pos', String(item.position));
+        if (item.leader !== undefined && item.leader !== 'none') {
+          tab.setAttributeNS(W_NS, 'w:leader', item.leader);
+        }
+        tabs.appendChild(tab);
+      }
+      pPr.insertBefore(tabs, findPPrInsertRef(pPr, TABS_AFTER_LOCALS));
+    }
+  }
+
   if (op.format.spacing !== undefined) {
     const spacing = upsertDirectChildW(pPr, 'spacing', SPACING_AFTER_LOCALS);
     if (op.format.spacing.before !== undefined) {
@@ -698,6 +715,34 @@ const JC_AFTER_LOCALS = new Set([
 
 const OUTLINE_AFTER_LOCALS = new Set(['rPr', 'sectPr', 'pPrChange', 'divId', 'cnfStyle']);
 
+const TABS_AFTER_LOCALS = new Set([
+  'suppressAutoHyphens',
+  'kinsoku',
+  'wordWrap',
+  'overflowPunct',
+  'topLinePunct',
+  'autoSpaceDE',
+  'autoSpaceDN',
+  'bidi',
+  'adjustRightInd',
+  'snapToGrid',
+  'spacing',
+  'ind',
+  'contextualSpacing',
+  'mirrorIndents',
+  'suppressOverlap',
+  'jc',
+  'textDirection',
+  'textAlignment',
+  'textboxTightWrap',
+  'outlineLvl',
+  'divId',
+  'cnfStyle',
+  'rPr',
+  'sectPr',
+  'pPrChange',
+]);
+
 function validateParagraphFormat(
   ctx: ExecutorContext,
   op: Extract<Op, { type: 'formatParagraph' }>,
@@ -707,7 +752,8 @@ function validateParagraphFormat(
     op.format.outlineLevel === undefined &&
     op.format.pageBreakBefore === undefined &&
     op.format.indent === undefined &&
-    op.format.spacing === undefined
+    op.format.spacing === undefined &&
+    op.format.tabs === undefined
   ) {
     throw new WordError(
       'INVALID_ARGUMENT',
@@ -759,6 +805,36 @@ function validateParagraphFormat(
         ctx.docId,
         { paraId: op.paraId, lineRule: op.format.spacing.lineRule, opType: 'formatParagraph' },
       );
+    }
+  }
+  if (op.format.tabs !== undefined) {
+    const alignments = ['left', 'center', 'right', 'decimal', 'bar', 'clear'];
+    const leaders = ['none', 'dot', 'hyphen', 'underscore', 'heavy', 'middleDot'];
+    for (const [index, item] of op.format.tabs.entries()) {
+      if (!Number.isInteger(item.position) || item.position < 0) {
+        throw new WordError(
+          'INVALID_ARGUMENT',
+          'formatParagraph tabs.position must be a non-negative integer twip value',
+          ctx.docId,
+          { paraId: op.paraId, index, position: item.position, opType: 'formatParagraph' },
+        );
+      }
+      if (item.alignment !== undefined && !alignments.includes(item.alignment)) {
+        throw new WordError(
+          'INVALID_ARGUMENT',
+          'formatParagraph tabs.alignment is invalid',
+          ctx.docId,
+          { paraId: op.paraId, index, alignment: item.alignment, opType: 'formatParagraph' },
+        );
+      }
+      if (item.leader !== undefined && !leaders.includes(item.leader)) {
+        throw new WordError(
+          'INVALID_ARGUMENT',
+          'formatParagraph tabs.leader is invalid',
+          ctx.docId,
+          { paraId: op.paraId, index, leader: item.leader, opType: 'formatParagraph' },
+        );
+      }
     }
   }
 }

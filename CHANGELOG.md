@@ -2,6 +2,13 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## Unreleased
+
+### Added
+
+- Added Word paragraph tab-stop mutations, including native leader styles, for
+  aligned form fields and other structured document layouts.
+
 ## [1.0.9] - 2026-11-10
 
 ### Fixed
