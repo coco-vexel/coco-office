@@ -215,6 +215,7 @@ export interface EditorTableCellView {
   rowSpan?: number;
   vMerge: 'restart' | 'continue' | null;
   width?: number;
+  widthType?: EditorTableLayout['widthType'];
   margin?: EditorBoxEdges;
   borders?: EditorTableBorders;
   shading?: {
@@ -250,6 +251,7 @@ export interface EditorTableView {
 }
 
 export interface EditorTableLayout {
+  mode?: 'autofit' | 'fixed';
   width?: number;
   widthType?: 'auto' | 'dxa' | 'pct';
   indent?: number;

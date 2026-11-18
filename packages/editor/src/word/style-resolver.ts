@@ -81,9 +81,11 @@ export function resolveRunStyle(format: EditorRunFormat | undefined | null): Res
   return resolved(declarations);
 }
 
-export function resolveTableCellStyle(cell: Pick<EditorTableCellView, 'margin' | 'borders' | 'shading' | 'verticalAlignment' | 'noWrap' | 'width'>): ResolvedStyle {
+export function resolveTableCellStyle(cell: Pick<EditorTableCellView, 'margin' | 'borders' | 'shading' | 'verticalAlignment' | 'noWrap' | 'width' | 'widthType'>): ResolvedStyle {
   const declarations: Record<string, string> = {};
-  if (cell.width !== undefined && cell.width > 0) declarations.width = twipsToPt(cell.width);
+  if (cell.width !== undefined && cell.width > 0 && cell.widthType !== 'auto') {
+    declarations.width = cell.widthType === 'pct' ? `${cell.width / 50}%` : twipsToPt(cell.width);
+  }
   if (cell.margin) {
     if (cell.margin.top !== undefined) declarations['padding-top'] = twipsToPt(cell.margin.top);
     if (cell.margin.right !== undefined) declarations['padding-right'] = twipsToPt(cell.margin.right);
@@ -218,7 +220,7 @@ function applyTableCellBorder(
 }
 
 function tableBorderToCss(border: EditorTableBorder): string | null {
-  if (border.val === 'none' || border.val === 'nil') return null;
+  if (border.val === 'none' || border.val === 'nil' || border.size === 0) return null;
   const color = colorToCss(border.color) ?? '#000000';
   const widthPt = border.size !== undefined ? Math.max(0.5, border.size / 8) : 0.75;
   const style = border.val === 'double' ? 'double' : 'solid';

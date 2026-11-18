@@ -1,3 +1,4 @@
+/// <reference lib="es2022.intl" />
 import type {
   NativeWordBlockNode,
   NativeWordDocument,
@@ -28,6 +29,7 @@ interface NativeRenderOptions {
 }
 
 const NATIVE_ANNOTATION_RAIL_WIDTH_PX = 260;
+const wordSegmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'word' }) : undefined;
 
 export function defineNativeWordElements(): void {
   defineElement('coco-word-native-document');
@@ -218,7 +220,7 @@ export function paginateNativeDocument(root: HTMLElement, doc: NativeWordDocumen
       sectionPageNumber,
     );
   };
-  const appendBlock = (block: HTMLElement, isFinalBodyBlock: boolean) => {
+  const appendBlock = (block: HTMLElement, nextBlock?: HTMLElement) => {
     const blockSectionIndex = sectionIndexForBlock(block, doc) ?? currentSectionIndex;
     if (body.children.length === 0) {
       moveEmptyPageToSection(blockSectionIndex);
@@ -233,50 +235,24 @@ export function paginateNativeDocument(root: HTMLElement, doc: NativeWordDocumen
     const hasForcedPageBreak = block.querySelector('.coco-word-page-break') !== null;
     if (body.scrollHeight > bodyLimit()) {
       const keepWithPrevious = previousKeepNextBlock(body, block);
-      if (keepWithPrevious) {
-        if (block.matches('coco-word-native-table')) {
-          body.removeChild(block);
-          const split = splitNativeTableAcrossPages(block, body, bodyLimit, nextPage);
-          if (split) {
-            if (!promotesToEmptyFlow) promotePageRelativeAnchors(page);
-            const sectionBreakType = sectionBreakTypeAfterBlock(block, doc);
-            const nextSectionIndex = sectionIndexAfterBlock(block, doc);
-            if (nextSectionIndex !== null) currentSectionIndex = nextSectionIndex;
-            if (hasForcedPageBreak || sectionBreakType) advanceAfterForcedBreak(nextPage, sectionBreakType);
-            return;
-          }
-          body.appendChild(block);
-        }
+      if (!splitNativeTableAcrossPages(block, body, bodyLimit, nextPage)) {
         body.removeChild(block);
-        body.removeChild(keepWithPrevious);
+        if (keepWithPrevious) body.removeChild(keepWithPrevious);
+        const tail = keepWithPrevious ? null : splitNativeParagraphToFitCurrentPage(block, body, bodyLimit);
         nextPage();
         moveEmptyPageToSection(blockSectionIndex);
-        body.appendChild(keepWithPrevious);
-        body.appendChild(block);
-        if (block.matches('coco-word-native-table') && body.scrollHeight > bodyLimit()) {
-          body.removeChild(block);
-          if (!splitNativeTableAcrossPages(block, body, bodyLimit, nextPage)) {
-            body.appendChild(block);
-          }
-        }
-      } else {
-        body.removeChild(block);
-        const splitParagraphTail = splitNativeParagraphToFitCurrentPage(block, body, bodyLimit);
-        if (splitParagraphTail) {
-          nextPage();
-          moveEmptyPageToSection(blockSectionIndex);
-          body.appendChild(splitParagraphTail);
-        } else {
-          const split = splitNativeTableAcrossPages(block, body, bodyLimit, nextPage);
-          if (!split) {
-            nextPage();
-            moveEmptyPageToSection(blockSectionIndex);
-            body.appendChild(block);
-          }
-        }
+        if (keepWithPrevious) body.appendChild(keepWithPrevious);
+        body.appendChild(tail ?? block);
       }
     } else if (block.matches('coco-word-native-table')) {
-      splitNativeTableTailForBottomReserve(block, body, bodyLimit, nextPage, isFinalBodyBlock);
+      const sectionBreak = nextBlock && sectionBreakTypeAfterBlock(nextBlock, doc);
+      const endsSection = nextBlock && sectionBreak && sectionBreak !== 'continuous' &&
+        sectionBreak !== 'nextColumn' && !nativeParagraphHasFlowContent(nextBlock);
+      const endsPage = endsSection || (nextBlock && shouldStartBlockOnNewPage(nextBlock));
+      const footer = page.querySelector<HTMLElement>(':scope > coco-word-native-story[data-story-kind="footer"]:not(.is-empty)');
+      if (!endsPage || (footer && block.getBoundingClientRect().bottom > footer.getBoundingClientRect().top)) {
+        splitNativeTableTailForBottomReserve(block, body, bodyLimit, nextPage, !nextBlock);
+      }
     }
     if (!promotesToEmptyFlow) promotePageRelativeAnchors(page);
     const sectionBreakType = sectionBreakTypeAfterBlock(block, doc);
@@ -285,7 +261,7 @@ export function paginateNativeDocument(root: HTMLElement, doc: NativeWordDocumen
     if (hasForcedPageBreak || sectionBreakType) advanceAfterForcedBreak(nextPage, sectionBreakType);
   };
   for (let index = 0; index < bodyBlocks.length; index += 1) {
-    appendBlock(bodyBlocks[index]!, index === bodyBlocks.length - 1);
+    appendBlock(bodyBlocks[index]!, bodyBlocks[index + 1]);
   }
   compactTrailingEmptyFlowPages(root);
   compactEmptyNativePages(root);
@@ -568,6 +544,7 @@ function moveTrailingIncrementalTableRows(
       child.dataset.tableId === tableId,
   );
   if (!targetBlock) {
+    preserveAutoFitGrid(sourceTable);
     targetBlock = createNativeTableChunk(sourceBlock, sourceTable);
     nextBody.insertBefore(targetBlock, nextBody.firstChild);
     const targetBody = targetBlock.querySelector<HTMLTableSectionElement>(':scope > table > tbody');
@@ -830,11 +807,13 @@ function splitNativeTableAcrossPages(
   nextPage: () => HTMLElement,
 ): boolean {
   if (block.tagName.toLowerCase() !== 'coco-word-native-table') return false;
-  const table = block.querySelector(':scope > table');
+  const table = block.querySelector<HTMLTableElement>(':scope > table');
   const sourceBody = table?.querySelector(':scope > tbody');
   const rows = sourceBody ? Array.from(sourceBody.children).filter(isTableRow) : [];
   const rowGroups = groupTableRowsForPagination(rows);
   if (!table || rowGroups.length < 2) return false;
+  preserveAutoFitGrid(table);
+  block.remove();
   let targetBody = currentBody;
   let chunk = createNativeTableChunk(block, table);
   let chunkBody = chunk.querySelector('tbody') as HTMLTableSectionElement;
@@ -907,11 +886,12 @@ function splitNativeTableTailForBottomReserve(
   const reserve = tableBottomReservePx(block, limit);
   if (remaining >= reserve) return false;
   if (isFinalBodyBlock && isShortFlexFilledTablePage(currentBody, limit)) return false;
-  const table = block.querySelector(':scope > table');
+  const table = block.querySelector<HTMLTableElement>(':scope > table');
   const sourceBody = table?.querySelector<HTMLTableSectionElement>(':scope > tbody');
   const rows = sourceBody ? Array.from(sourceBody.children).filter(isTableRow) : [];
   const rowGroups = groupTableRowsForPagination(rows);
   if (!table || !sourceBody || rowGroups.length < 4) return false;
+  preserveAutoFitGrid(table);
 
   const headerRows = rows.filter((row) => row.dataset.repeatHeader === 'true');
   const initialRemaining = remaining;
@@ -1378,6 +1358,19 @@ function removeTableRowGroup(target: HTMLTableSectionElement, group: HTMLTableRo
   for (const row of group) {
     if (row.parentElement === target) target.removeChild(row);
   }
+}
+
+// All page fragments must use the grid measured with every row present.
+function preserveAutoFitGrid(table: HTMLTableElement): void {
+  if (table.dataset.layout !== 'autofit' || table.hasAttribute('data-shared-grid')) return;
+  const columns = Array.from(table.querySelectorAll<HTMLTableColElement>(':scope > colgroup > col'));
+  const width = getComputedStyle(table).width;
+  const widths = columns.map((col) => getComputedStyle(col).width);
+  if (!width.endsWith('px') || parseFloat(width) <= 0 || !widths.length || widths.some((w) => !w.endsWith('px'))) return;
+  table.dataset.sharedGrid = 'true';
+  table.style.tableLayout = 'fixed';
+  table.style.width = width;
+  columns.forEach((col, i) => { col.style.width = widths[i]!; });
 }
 
 function createNativeTableChunk(sourceBlock: HTMLElement, sourceTable: Element): HTMLElement {
@@ -1965,15 +1958,17 @@ function applyNativePageLayout(
 ): void {
   page.style.width = twipsToPx(layout.width);
   page.style.height = twipsToPx(layout.height);
-  page.style.paddingTop = twipsToPx(layout.margin.top);
+  const topMargin = Math.abs(layout.margin.top);
+  page.toggleAttribute('data-fixed-top-margin', layout.margin.top < 0);
+  page.style.paddingTop = twipsToPx(topMargin);
   page.style.paddingRight = twipsToPx(layout.margin.right);
   page.style.paddingBottom = twipsToPx(layout.margin.bottom);
   page.style.paddingLeft = twipsToPx(layout.margin.left);
-  page.style.setProperty('--coco-word-page-margin-top', twipsToPx(layout.margin.top));
+  page.style.setProperty('--coco-word-page-margin-top', twipsToPx(topMargin));
   page.style.setProperty('--coco-word-page-margin-left', twipsToPx(layout.margin.left));
   page.style.setProperty('--coco-word-page-margin-right', twipsToPx(layout.margin.right));
   page.style.setProperty('--coco-word-page-margin-bottom', twipsToPx(layout.margin.bottom));
-  page.style.setProperty('--coco-word-header-distance', twipsToPx(layout.headerDistance ?? Math.round(layout.margin.top / 2)));
+  page.style.setProperty('--coco-word-header-distance', twipsToPx(layout.headerDistance ?? Math.round(topMargin / 2)));
   page.style.setProperty('--coco-word-footer-distance', twipsToPx(layout.footerDistance ?? Math.round(layout.margin.bottom / 2)));
   if (layout.docGrid?.linePitch !== undefined && layout.docGrid.linePitch > 0) {
     page.style.setProperty('--coco-word-doc-grid-line-height', twipsToPx(layout.docGrid.linePitch));
@@ -1983,7 +1978,7 @@ function applyNativePageLayout(
 }
 
 function contentHeightForLayout(layout: NonNullable<NativeWordDocument['pageLayout']>): number {
-  return Math.max(120, twipsToPxNumber(layout.height - layout.margin.top - layout.margin.bottom));
+  return Math.max(120, twipsToPxNumber(layout.height - Math.abs(layout.margin.top) - layout.margin.bottom));
 }
 
 function selectHeaderFooterTemplates(
@@ -2201,9 +2196,25 @@ export function renderNativeParagraph(paragraph: NativeWordParagraphNode, option
     el.appendChild(tabRow);
     return el;
   }
+  const isPageStory = paragraph.story.startsWith('header:') || paragraph.story.startsWith('footer:');
   for (const child of paragraph.content) {
     if (child.kind === 'text') {
-      el.appendChild(renderNativeText(child));
+      const run = renderNativeText(child);
+      const family = child.format?.fontFamily ?? paragraph.format?.fontFamily ?? '';
+      if (isPageStory && /^(宋体|SimSun)$/i.test(family) && / {2}/.test(child.text)) {
+        // Keep authored spaces selectable at the half-em SimSun advance, even with a substitute font.
+        const wrapper = run instanceof HTMLElement ? run : document.createElement('span');
+        wrapper.replaceChildren(...child.text.split(/( {2,})/).filter(Boolean).map((part) => {
+          if (part[0] !== ' ' || part.trim()) return document.createTextNode(part);
+          const spaces = document.createElement('span');
+          spaces.className = 'coco-word-songti-spaces';
+          spaces.textContent = part;
+          return spaces;
+        }));
+        el.appendChild(wrapper);
+      } else {
+        el.appendChild(run);
+      }
     } else if (child.kind === 'field') {
       el.appendChild(renderNativeField(child));
     } else if (child.kind === 'image') {
@@ -2221,6 +2232,15 @@ export function renderNativeParagraph(paragraph: NativeWordParagraphNode, option
   }
   // Keep an empty paragraph keyboard-focusable, including newly inserted table cells.
   if (el.childNodes.length === 0) el.appendChild(document.createTextNode(''));
+  // A first-line indent and a single CJK word both contribute to a cell's minimum width.
+  const text = el.textContent ?? '';
+  if (wordSegmenter && (paragraph.format?.indent?.firstLine ?? 0) > 0 && /[\u3400-\u9fff]/.test(text)) {
+    let words = 0;
+    for (const segment of wordSegmenter.segment(text)) {
+      if (segment.isWordLike && ++words > 1) break;
+    }
+    if (words === 1) el.classList.add('is-single-cjk-word');
+  }
   return el;
 }
 
@@ -2659,10 +2679,6 @@ function mapDrawingTextAlign(value: string): string {
 export function renderNativeTable(table: NativeWordTableNode): HTMLElement {
   const el = document.createElement('coco-word-native-table');
   el.setAttribute('data-table-id', table.tableId);
-  if (!nativeTableHasVisibleBorders(table)) {
-    el.classList.add('shows-auxiliary-gridlines');
-    el.dataset.auxiliaryGridlines = 'true';
-  }
   if (table.revision) {
     el.classList.add(table.revision.revisionKind === 'delete' ? 'coco-word-revision-delete' : 'coco-word-revision-insert');
     el.dataset.revisionId = table.revision.revisionId;
@@ -2673,28 +2689,24 @@ export function renderNativeTable(table: NativeWordTableNode): HTMLElement {
   }
   if (table.tableStyleId) el.setAttribute('data-style-id', table.tableStyleId);
   const tableEl = document.createElement('table');
-  const border = tableBorderCss(table);
-  if (border) tableEl.style.setProperty('--coco-word-table-border', border);
+  tableEl.dataset.layout = table.layout?.mode ?? 'autofit';
   applyNativeTableLayout(tableEl, table);
-  if (table.columnWidths.some((width) => width > 0)) {
-    const colgroup = document.createElement('colgroup');
-    let tableWidth = 0;
-    for (const width of table.columnWidths) tableWidth += Math.max(0, width);
-    for (const width of table.columnWidths) {
-      const col = document.createElement('col');
-      if (width > 0) {
-        col.style.width =
-          table.layout?.widthType === 'pct' && tableWidth > 0
-            ? `${(width / tableWidth) * 100}%`
-            : twipsToPt(width);
-      }
-      colgroup.appendChild(col);
-    }
-    tableEl.appendChild(colgroup);
-    if (tableWidth > 0 && tableEl.style.width.length === 0) tableEl.style.width = twipsToPt(tableWidth);
-  }
-  const tbody = document.createElement('tbody');
   const columnCount = nativeTableColumnCount(table);
+  const colgroup = document.createElement('colgroup');
+  const tableWidth = table.columnWidths.reduce((sum, width) => sum + Math.max(0, width), 0);
+  for (let index = 0; index < columnCount; index++) {
+    const width = table.columnWidths[index] ?? 0;
+    const col = document.createElement('col');
+    if (width > 0) {
+      col.style.width = table.layout?.widthType === 'pct'
+        ? `${(width / tableWidth) * 100}%`
+        : twipsToPt(width);
+    }
+    colgroup.appendChild(col);
+  }
+  tableEl.appendChild(colgroup);
+  if (tableWidth > 0 && !tableEl.style.width) tableEl.style.width = twipsToPt(tableWidth);
+  const tbody = document.createElement('tbody');
   for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex += 1) {
     const row = table.rows[rowIndex]!;
     const tr = document.createElement('tr');
@@ -2732,8 +2744,21 @@ export function renderNativeTable(table: NativeWordTableNode): HTMLElement {
           columnSpan: gridSpan,
           columnCount,
         }),
-      }).cssText;
-      if (cellStyle.length > 0) td.setAttribute('style', cellStyle);
+      });
+      if (cellStyle.cssText) td.setAttribute('style', cellStyle.cssText);
+      // Collapsed cells share an edge. Draw it once, plus the top and left perimeter.
+      const spaced = (table.layout?.cellSpacing ?? 0) > 0;
+      const gridWidths = (['top', 'right', 'bottom', 'left'] as const).map((side) => {
+        const border = cellStyle.declarations[`border-${side}`];
+        if (border && border !== '0') return '0';
+        if (!spaced && side === 'top' && rowIndex !== 0) return '0';
+        if (!spaced && side === 'left' && cellColumnIndex !== 0) return '0';
+        return '1px';
+      });
+      if (gridWidths.includes('1px')) {
+        td.classList.add('has-editing-gridlines');
+        td.style.setProperty('--coco-word-grid-widths', gridWidths.join(' '));
+      }
       td.contentEditable = 'true';
       for (const block of cell.blocks) {
         const renderedBlock = renderNativeBlock(block);
@@ -2764,10 +2789,9 @@ export interface NativeTableCellPosition {
 }
 
 function nativeTableColumnCount(table: NativeWordTableNode): number {
-  const gridColumnCount = table.columnWidths.filter((width) => width > 0).length;
-  if (gridColumnCount > 0) return gridColumnCount;
   return Math.max(
     1,
+    table.columnWidths.length,
     ...table.rows.map((row) =>
       row.cells.reduce((sum, cell) => sum + Math.max(1, cell.gridSpan), 0),
     ),
@@ -2782,7 +2806,7 @@ export function resolveNativeTableCellBorders(
   const tableBorders = table.borders;
   if (!tableBorders && !cell.borders) return undefined;
   return {
-    ...effectiveTableCellBorders(tableBorders, position),
+    ...effectiveTableCellBorders(tableBorders, position, cell.rowSpan ?? 1),
     ...(cell.borders ?? {}),
   };
 }
@@ -2790,11 +2814,12 @@ export function resolveNativeTableCellBorders(
 function effectiveTableCellBorders(
   borders: EditorTableBorders | undefined,
   position: NativeTableCellPosition,
+  rowSpan: number,
 ): EditorTableBorders {
   if (!borders) return {};
   const nil = { val: 'nil' };
   const isFirstRow = position.rowIndex === 0;
-  const isLastRow = position.rowIndex >= position.rowCount - 1;
+  const isLastRow = position.rowIndex + rowSpan >= position.rowCount;
   const isFirstColumn = position.columnIndex === 0;
   const isLastColumn = position.columnIndex + position.columnSpan >= position.columnCount;
   return {
@@ -2845,32 +2870,6 @@ function twipsToPxNumber(twips: number): number {
 
 function emuToPxNumber(emu: number): number {
   return (emu / 914400) * 96;
-}
-
-function tableBorderCss(table: NativeWordTableNode): string | null {
-  const border =
-    table.borders?.insideH ??
-    table.borders?.insideV ??
-    table.borders?.top ??
-    table.borders?.left ??
-    table.borders?.bottom ??
-    table.borders?.right;
-  if (!border || border.val === 'none' || border.val === 'nil') return null;
-  const color = border.color && /^[0-9a-f]{6}$/i.test(border.color) ? `#${border.color}` : '#d4d4d8';
-  const width = border.size !== undefined ? Math.max(0.5, border.size / 8) : 0.75;
-  const style = border.val === 'double' ? 'double' : 'solid';
-  return `${width}pt ${style} ${color}`;
-}
-
-function nativeTableHasVisibleBorders(table: NativeWordTableNode): boolean {
-  const hasVisibleBorder = (borders: EditorTableBorders | undefined): boolean =>
-    Object.values(borders ?? {}).some((border) =>
-      border !== undefined && border.val !== 'none' && border.val !== 'nil',
-    );
-
-  return hasVisibleBorder(table.borders) || table.rows.some((row) =>
-    row.cells.some((cell) => hasVisibleBorder(cell.borders)),
-  );
 }
 
 function defineElement(name: string): void {

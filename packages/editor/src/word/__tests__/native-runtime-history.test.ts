@@ -570,7 +570,7 @@ describe('native runtime history integration', () => {
           type: 'table',
           tableId: 'bordered-table',
           columnWidths: [1800],
-          borders: { top: { val: 'single', color: '000000', size: 8 } },
+          borders: { top: { val: 'single', color: '000000', size: 8 }, left: { val: 'single', size: 0 } },
           rows: [
             { cells: [
               { text: bordered.text, gridSpan: 1, vMerge: null, blocks: [bordered], paragraphs: [bordered] },
@@ -580,11 +580,14 @@ describe('native runtime history integration', () => {
       ],
     }, { styleIsolation: 'none' });
     const renderedTable = host.querySelector<HTMLElement>('coco-word-native-table[data-table-id="vertical-table"]');
-    expect(renderedTable?.classList.contains('shows-auxiliary-gridlines')).toBe(true);
-    expect(renderedTable?.dataset.auxiliaryGridlines).toBe('true');
+    const guideWidths = (cell: HTMLElement) => cell.style.getPropertyValue('--coco-word-grid-widths');
+    expect(Array.from(renderedTable!.querySelectorAll('td'), guideWidths)).toEqual([
+      '1px 1px 1px 1px', '1px 1px 1px 0', '0 1px 1px 0',
+    ]);
     const borderedTable = host.querySelector<HTMLElement>('coco-word-native-table[data-table-id="bordered-table"]');
-    expect(borderedTable?.classList.contains('shows-auxiliary-gridlines')).toBe(false);
-    expect(borderedTable?.dataset.auxiliaryGridlines).toBeUndefined();
+    const borderedCell = borderedTable!.querySelector('td')!;
+    expect(guideWidths(borderedCell)).toBe('0 1px 1px 1px');
+    expect(borderedCell.style.borderTopStyle).toBe('solid');
     const cell = host.querySelector<HTMLElement>('coco-word-native-table[data-table-id="vertical-table"] td[data-row-index="0"][data-column-index="0"]');
     expect(cell).not.toBeNull();
     cell?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
@@ -664,6 +667,36 @@ describe('native runtime history integration', () => {
     expect(footerNode ? visibleParagraphText(footerNode) : '').toBe('Footer?');
     expect(host.querySelector('coco-word-native-story[data-story-kind="header"] [data-para-id="H1"]')).not.toBeNull();
     expect(host.querySelector('coco-word-native-story[data-story-kind="footer"] [data-para-id="F1"]')).not.toBeNull();
+  });
+
+  test('keeps authored Songti header spaces in text flow even with unused tab stops', () => {
+    editor.destroy();
+    const header = paragraph('HSPACE', 'SAMPLE1' + ' '.repeat(46) + '编号：A');
+    header.story = 'header:word/header1.xml';
+    header.segments = [
+      { kind: 'text', from: 0, to: 7, text: 'SAMPLE1' },
+      { kind: 'text', from: 7, to: 15, text: ' '.repeat(8) },
+      { kind: 'text', from: 15, to: 32, text: ' '.repeat(17) },
+      { kind: 'text', from: 32, to: 53, text: ' '.repeat(21) },
+      { kind: 'text', from: 53, to: header.text.length, text: '编号：A' },
+    ];
+    header.format = {
+      fontFamily: '宋体',
+      tabStops: [
+        { alignment: 'center', position: 4153 },
+        { alignment: 'right', position: 8306 },
+      ],
+    };
+    editor = renderNativeWordEditor(host, {
+      ...viewFixture(),
+      headers: [{ kind: 'header', partName: 'word/header1.xml', blocks: [header], paragraphs: [header], tables: [] }],
+    }, { styleIsolation: 'none' });
+
+    const rendered = host.querySelector<HTMLElement>('[data-para-id="HSPACE"]');
+    expect(rendered?.querySelector('.coco-word-tab-row')).toBeNull();
+    expect(Array.from(rendered!.querySelectorAll('.coco-word-songti-spaces'), (node) => node.textContent?.length))
+      .toEqual([8, 17, 21]);
+    expect(rendered?.textContent).toBe(header.text);
   });
 
   test('adds comments to selected text and round-trips through native history', async () => {

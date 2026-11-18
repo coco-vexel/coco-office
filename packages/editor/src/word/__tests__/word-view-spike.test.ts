@@ -390,6 +390,7 @@ const TABLE_DOC_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <w:tc><w:tcPr><w:gridSpan w:val="3"/></w:tcPr><w:p><w:r><w:t>指标汇总</w:t></w:r></w:p></w:tc>
       </w:tr>
       <w:tr>
+        <w:tblPrEx><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:left w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPrEx>
         <w:tc><w:tcPr><w:vMerge w:val="restart"/><w:noWrap/></w:tcPr><w:p><w:r><w:t>第一季度</w:t></w:r></w:p></w:tc>
         <w:tc>
           <w:p><w:r><w:t>收入</w:t></w:r></w:p>
@@ -1156,6 +1157,22 @@ describe('@coco-vexel/coco-office-editor word spike', () => {
 
   });
 
+  test('resolves the table layout mode and keeps percentage cell widths', async () => {
+    const zip = await JSZip.loadAsync(await makeTableFixtureZip());
+    zip.file('word/styles.xml', STYLES_XML.replace('<w:tblBorders>', '<w:tblLayout w:type="fixed"/><w:tblBorders>'));
+    const table = (properties: string) => `<w:tbl>
+      <w:tblPr>${properties}</w:tblPr><w:tblGrid><w:gridCol w:w="1200"/></w:tblGrid>
+      <w:tr><w:tc><w:tcPr><w:tcW w:type="pct" w:w="2500"/></w:tcPr><w:p/></w:tc></w:tr></w:tbl>`;
+    const inherited = '<w:tblStyle w:val="ChildGridStyle"/>';
+    zip.file('word/document.xml', `<w:document xmlns:w="${W_NS}"><w:body>
+      ${table('')}${table(inherited)}${table(inherited + '<w:tblLayout w:type="autofit"/>')}
+    </w:body></w:document>`);
+    const pkg = await fromZip(await zip.generateAsync({ type: 'uint8array' }));
+    const view = buildWordEditorViewFromPackage(pkg, buildIndices(pkg));
+    expect(view.tables.map((item) => item.layout?.mode)).toEqual([undefined, 'fixed', 'autofit']);
+    expect(view.tables[0]?.rows[0]?.cells[0]).toMatchObject({ width: 2500, widthType: 'pct' });
+  });
+
   test('preserves cell text without paraIds and projects vertical and horizontal merges', async () => {
     const pkg = await fromZip(await makeTableFixtureZip());
     const wordView = buildWordEditorViewFromPackage(pkg, buildIndices(pkg));
@@ -1216,6 +1233,7 @@ describe('@coco-vexel/coco-office-editor word spike', () => {
       rowSpan: 3,
       vMerge: 'restart',
       noWrap: true,
+      margin: { top: 80, right: 40, bottom: 20, left: 108 },
       shading: { fill: 'E2F0D9' },
     });
     expect(table.rows[1]!.cells[0]!.paragraphs[0]!.text).toBe('第一季度');

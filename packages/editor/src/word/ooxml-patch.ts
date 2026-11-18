@@ -1268,7 +1268,7 @@ function createNativeTableElement(
   const properties = create('tblPr');
   const width = create('tblW');
   width.setAttributeNS(W_NS, 'w:w', String(Math.max(0, Math.round(table.layout?.width ?? 0))));
-  width.setAttributeNS(W_NS, 'w:type', table.layout?.widthType === 'pct' ? 'pct' : 'dxa');
+  width.setAttributeNS(W_NS, 'w:type', table.layout?.widthType ?? 'dxa');
   properties.appendChild(width);
   const borders: WordTableBorders = {};
   for (const edge of ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'] as const) {
@@ -1280,6 +1280,11 @@ function createNativeTableElement(
     };
   }
   writeWordTableBorders(properties, 'table', borders);
+  if (table.layout?.mode) {
+    const layout = create('tblLayout');
+    layout.setAttributeNS(W_NS, 'w:type', table.layout.mode);
+    properties.appendChild(layout);
+  }
   tableElement.appendChild(properties);
   const grid = create('tblGrid');
   for (const columnWidth of table.columnWidths) {
@@ -1308,8 +1313,8 @@ function createNativeTableCellElement(
   const cellElement = create('tc');
   const properties = create('tcPr');
   const width = create('tcW');
-  width.setAttributeNS(W_NS, 'w:w', String(Math.max(1, Math.round(cell.width ?? 0))));
-  width.setAttributeNS(W_NS, 'w:type', 'dxa');
+  width.setAttributeNS(W_NS, 'w:w', String(cell.widthType === 'auto' ? 0 : Math.max(1, Math.round(cell.width ?? 0))));
+  width.setAttributeNS(W_NS, 'w:type', cell.widthType ?? 'dxa');
   properties.appendChild(width);
   if (cell.shading?.fill) {
     const shading = create('shd');

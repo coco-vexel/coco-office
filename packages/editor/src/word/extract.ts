@@ -134,7 +134,8 @@ export function buildWordEditorViewFromPackage(
     documentDefaults: extractDocumentDefaults(pkg, theme),
     numbering: buildNumberingDefinitions(pkg),
     numberingCounters: new Map(),
-    defaultParagraphStyleId: findDefaultParagraphStyleId(pkg),
+    defaultParagraphStyleId: findDefaultStyleId(pkg, 'paragraph'),
+    defaultTableStyleId: findDefaultStyleId(pkg, 'table'),
     paragraphStyleFormats: buildParagraphStyleFormats(pkg, indices, theme),
     tableStyleFormats: buildTableStyleFormats(pkg, theme),
     hyperlinkByElement: buildHyperlinkMap(pkg),
@@ -697,7 +698,8 @@ function buildEditorTable(
   const tableStyle = info.tableStyleId ? context.tableStyleFormats.get(info.tableStyleId) : undefined;
   const tableMargins = parseTableCellMargins(tableEl) ?? tableStyle?.cellMargin;
   const borders = parseTableBorders(tableEl) ?? tableStyle?.borders;
-  const layout = parseTableLayout(tableEl);
+  const layoutStyle = tableStyle ?? context.tableStyleFormats.get(context.defaultTableStyleId ?? '');
+  const layout = parseTableLayout(tableEl, layoutStyle?.layoutMode);
   const tableLook = mergeTableLooks(tableStyle?.tableLook, parseTableLook(tableEl));
   let physicalCellIndex = 0;
   return {
@@ -771,12 +773,19 @@ function buildEditorTable(
           const rowSpan = rowSpans.get(`${rowIndex}:${cellIndex}`);
           if (rowSpan !== undefined && rowSpan > 1) view.rowSpan = rowSpan;
           if (cell.width !== undefined) view.width = cell.width;
+          const tcPr = cellEl ? firstDirectChild(cellEl, W_NS, 'tcPr') : null;
+          const widthType = tcPr && firstDirectChild(tcPr, W_NS, 'tcW')?.getAttributeNS(W_NS, 'type');
+          if (widthType === 'pct' || widthType === 'auto') view.widthType = widthType;
           const directCellProperties = parseCellProperties(cellEl, context.theme);
-          const margin =
-            directCellProperties?.margin ??
-            conditionalStyle?.cell?.margin ??
-            tableStyle?.cell?.margin ??
-            tableMargins;
+          // Word layers style defaults, direct table properties, row exceptions, then cell overrides.
+          // Merge individual edges so a partial tblPrEx/tcMar does not discard inherited sides.
+          const margin = mergeBoxEdges(
+            tableStyle?.cell?.margin,
+            conditionalStyle?.cell?.margin,
+            tableMargins,
+            rowProps.cellMargin,
+            directCellProperties?.margin,
+          );
           if (margin) view.margin = margin;
           const borders =
             directCellProperties?.borders ??
@@ -877,9 +886,16 @@ function collectNestedTables(table: EditorTableView): EditorTableView[] {
   );
 }
 
-function parseTableRowProperties(rowEl: Element | undefined): Pick<EditorTableRowView, 'isHeader' | 'cantSplit'> {
-  const row: Pick<EditorTableRowView, 'isHeader' | 'cantSplit'> = {};
+function parseTableRowProperties(
+  rowEl: Element | undefined,
+): Pick<EditorTableRowView, 'isHeader' | 'cantSplit'> & { cellMargin?: EditorBoxEdges } {
+  const row: Pick<EditorTableRowView, 'isHeader' | 'cantSplit'> & { cellMargin?: EditorBoxEdges } = {};
   if (!rowEl) return row;
+  const tblPrEx = firstDirectChild(rowEl, W_NS, 'tblPrEx');
+  const cellMargin = tblPrEx
+    ? parseMargins(firstDirectChild(tblPrEx, W_NS, 'tblCellMar'))
+    : undefined;
+  if (cellMargin) row.cellMargin = cellMargin;
   const trPr = firstDirectChild(rowEl, W_NS, 'trPr');
   if (!trPr) return row;
   const tblHeader = parseOnOff(firstDirectChild(trPr, W_NS, 'tblHeader'));
@@ -893,10 +909,17 @@ function parseTableRowProperties(rowEl: Element | undefined): Pick<EditorTableRo
   return row;
 }
 
-function parseTableLayout(tableEl: Element): EditorTableView['layout'] | undefined {
+function tableLayoutMode(tblPr: Element | null): EditorTableStyleFormat['layoutMode'] {
+  const value = tblPr && firstDirectChild(tblPr, W_NS, 'tblLayout')?.getAttributeNS(W_NS, 'type');
+  return value === 'autofit' || value === 'fixed' ? value : undefined;
+}
+
+function parseTableLayout(tableEl: Element, inheritedMode?: EditorTableStyleFormat['layoutMode']): EditorTableView['layout'] | undefined {
   const tblPr = firstDirectChild(tableEl, W_NS, 'tblPr');
-  if (!tblPr) return undefined;
+  if (!tblPr) return inheritedMode ? { mode: inheritedMode } : undefined;
   const layout: NonNullable<EditorTableView['layout']> = {};
+  const mode = tableLayoutMode(tblPr) ?? inheritedMode;
+  if (mode) layout.mode = mode;
 
   const tblW = firstDirectChild(tblPr, W_NS, 'tblW');
   if (tblW) {
@@ -1021,6 +1044,11 @@ function parseMargins(parent: Element | null): EditorBoxEdges | undefined {
     if (value !== undefined) margins[side] = value;
   }
   return Object.keys(margins).length > 0 ? margins : undefined;
+}
+
+function mergeBoxEdges(...layers: Array<EditorBoxEdges | undefined>): EditorBoxEdges | undefined {
+  const merged = Object.assign({}, ...layers.filter((layer): layer is EditorBoxEdges => layer !== undefined));
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 function parseTableBorders(tableEl: Element): EditorTableBorders | undefined {
@@ -1725,6 +1753,7 @@ interface ExtractContext {
   numbering: NumberingDefinitions;
   numberingCounters: Map<string, number>;
   defaultParagraphStyleId?: string;
+  defaultTableStyleId?: string;
   paragraphStyleFormats: Map<string, EditorParagraphFormat>;
   tableStyleFormats: Map<string, EditorTableStyleFormat>;
   hyperlinkByElement: Map<Element, EditorHyperlink>;
@@ -1857,6 +1886,7 @@ interface EditorTableStyleData {
 }
 
 interface EditorTableStyleFormat {
+  layoutMode?: NonNullable<EditorTableView['layout']>['mode'];
   borders?: EditorTableBorders;
   cellMargin?: EditorBoxEdges;
   tableLook?: EditorTableLook;
@@ -2079,7 +2109,7 @@ function buildParagraphStyleFormats(
   return resolved;
 }
 
-function findDefaultParagraphStyleId(pkg: Package): string | undefined {
+function findDefaultStyleId(pkg: Package, styleType: 'paragraph' | 'table'): string | undefined {
   const stylesDom = findStylesDom(pkg);
   if (!stylesDom) return undefined;
   const styleEls = stylesDom.getElementsByTagNameNS(W_NS, 'style');
@@ -2087,7 +2117,7 @@ function findDefaultParagraphStyleId(pkg: Package): string | undefined {
     const styleEl = styleEls[i];
     if (!styleEl) continue;
     const type = styleEl.getAttributeNS(W_NS, 'type') ?? 'paragraph';
-    if (type !== 'paragraph') continue;
+    if (type !== styleType) continue;
     if (styleEl.getAttributeNS(W_NS, 'default') !== '1') continue;
     const styleId = styleEl.getAttributeNS(W_NS, 'styleId');
     if (styleId) return styleId;
@@ -2204,6 +2234,8 @@ function parseTableStyleProperties(
 ): EditorTableStyleFormat | undefined {
   const format: EditorTableStyleFormat = {};
   if (tblPr) {
+    const mode = tableLayoutMode(tblPr);
+    if (mode) format.layoutMode = mode;
     const borders = parseTableBordersFromPr(tblPr);
     if (borders) format.borders = borders;
     const cellMargin = parseMargins(firstDirectChild(tblPr, W_NS, 'tblCellMar'));

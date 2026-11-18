@@ -154,6 +154,7 @@ export interface NativeWordTableCellNode {
   rowSpan?: number;
   vMerge?: EditorTableCellView['vMerge'];
   width?: number;
+  widthType?: EditorTableCellView['widthType'];
   margin?: EditorTableCellView['margin'];
   borders?: EditorTableCellView['borders'];
   shading?: EditorTableCellView['shading'];
@@ -430,6 +431,7 @@ function nativeTableCellFromEditorCell(cell: EditorTableCellView): NativeWordTab
   if (cell.rowSpan !== undefined) nativeCell.rowSpan = cell.rowSpan;
   if (cell.vMerge !== undefined) nativeCell.vMerge = cell.vMerge;
   if (cell.width !== undefined) nativeCell.width = cell.width;
+  if (cell.widthType !== undefined) nativeCell.widthType = cell.widthType;
   if (cell.margin !== undefined) nativeCell.margin = cell.margin;
   if (cell.borders !== undefined) nativeCell.borders = cell.borders;
   if (cell.shading !== undefined) nativeCell.shading = cell.shading;

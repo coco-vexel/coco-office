@@ -668,6 +668,16 @@ coco-word-native-page > coco-word-native-story[data-story-kind="header"] {
   top: var(--coco-word-header-distance, 0);
 }
 
+/* With a nonnegative top margin Word moves the body down if the header outgrows
+   its reserved space. Let the same flex layout that pagination measures do this. */
+coco-word-native-page:not([data-fixed-top-margin]) > coco-word-native-story[data-story-kind="header"] {
+  position: relative;
+  inset: auto;
+  flex: none;
+  margin-top: calc(var(--coco-word-header-distance) - var(--coco-word-page-margin-top));
+  min-height: max(0px, calc(var(--coco-word-page-margin-top) - var(--coco-word-header-distance)));
+}
+
 coco-word-native-page > coco-word-native-story[data-story-kind="footer"] {
   bottom: var(--coco-word-footer-distance, 0);
 }
@@ -806,6 +816,12 @@ coco-word-native-p.has-tab-stops {
   display: none;
 }
 
+/* In a monospace face the ASCII space and '0' both advance by exactly 1ch. */
+.coco-word-songti-spaces {
+  font-family: monospace;
+  word-spacing: calc(0.5em - 1ch);
+}
+
 coco-word-native-p[data-numbering="true"] {
   margin-left: 2.8em;
   padding-right: 0.5em;
@@ -836,18 +852,35 @@ coco-word-native-table {
   margin: 0;
   max-width: 100%;
   overflow: auto;
-  scrollbar-gutter: stable;
   --coco-word-doc-grid-line-height: 1em;
   white-space: pre-wrap;
 }
 
 coco-word-native-table table {
   box-sizing: border-box;
-  min-width: 100%;
+  width: 100%;
   max-width: none;
   margin: 0;
   border-collapse: collapse;
   table-layout: fixed;
+}
+
+coco-word-native-table table[data-layout="autofit"] {
+  table-layout: auto;
+}
+
+coco-word-native-table table[data-layout="autofit"] > tbody > tr > td {
+  min-width: 0;
+}
+
+/* Keep whole words in the intrinsic width used by AutoFit. */
+coco-word-native-table table[data-layout="autofit"] > tbody > tr > td > coco-word-native-p {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+coco-word-native-table table[data-layout="autofit"] > tbody > tr > td > coco-word-native-p.is-single-cjk-word {
+  word-break: keep-all;
 }
 
 coco-word-native-table tbody {
@@ -871,9 +904,20 @@ coco-word-native-table td {
   vertical-align: top;
 }
 
-/* Editor-only gridlines keep borderless OOXML tables legible without changing their document formatting. */
-coco-word-native-table.shows-auxiliary-gridlines > table > tbody > tr > td {
-  border: 1px dashed rgb(148 163 184 / 72%) !important;
+/* Guides sit inside the cell so they don't affect text wrapping or pagination. */
+@media screen {
+  coco-word-native-table td.has-editing-gridlines {
+    position: relative;
+  }
+
+  coco-word-native-table td.has-editing-gridlines::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border: dashed #bfc3c8;
+    border-width: var(--coco-word-grid-widths);
+  }
 }
 
 coco-word-native-table td coco-word-native-p {

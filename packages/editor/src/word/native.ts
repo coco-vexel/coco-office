@@ -624,6 +624,9 @@ export function renderNativeWordEditor(
     }, 450);
   };
 
+  const usesSharedTableGrid = (root: HTMLElement, paraId: string) =>
+    root.querySelector(`table[data-shared-grid] coco-word-native-p[data-para-id="${paraId}"]`) !== null;
+
   const reflowFromParagraph = (
     paraId: string,
     cursor?: NativeCursorPoint,
@@ -631,6 +634,12 @@ export function renderNativeWordEditor(
   ): boolean => {
     const root = host.querySelector<HTMLElement>(':scope > coco-word-native-document');
     if (!root) return false;
+    if (usesSharedTableGrid(root, paraId)) {
+      // An edit on a later page can change the grid and the page breaks on earlier pages.
+      const current = preservedSelection ?? (cursor ? undefined : currentNativeSelection(host) ?? undefined);
+      render(cursor ?? (current?.kind === 'caret' ? current : undefined), current);
+      return true;
+    }
     const changed = reflowNativeDocumentFromParagraph(root, doc, paraId);
     observeNativeTableSizes(root);
     for (const image of Array.from(
@@ -719,6 +728,7 @@ export function renderNativeWordEditor(
       const baseline = typingLayoutBaseline;
       typingLayoutBaseline = null;
       if (!baseline || baseline.paraId !== paraId) return false;
+      if (usesSharedTableGrid(root, paraId)) return true;
       const current = measureNativeDocumentReflowFromParagraph(root, doc, paraId);
       return (
         current.overflowPx > Math.max(1, baseline.measurement.overflowPx + 1) ||
