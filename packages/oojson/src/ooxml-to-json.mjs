@@ -50,6 +50,8 @@ function xmlPpToJson(pPrNode, gaps) {
     if (ind.attrs["w:right"]) o.ind.right = a2i(ind.attrs["w:right"]);
     if (ind.attrs["w:firstLine"]) o.ind.firstLine = a2i(ind.attrs["w:firstLine"]);
   }
+  const outline = a2i(g("w:outlineLvl")?.attrs["w:val"]);
+  if (Number.isInteger(outline) && outline >= 0 && outline <= 9) o.outlineLvl = outline;
   if (g("w:jc")) o.jc = g("w:jc").attrs["w:val"];
   return { ...readExtra(pPrNode), ...o };
 }
@@ -222,18 +224,33 @@ function xmlMar(node) {
   return Object.keys(o).length ? o : undefined;
 }
 function tblPrToJson(node, gaps) {
-  const o = { type: "tablePr" };
+  const o = { type: "tablePr", ...readExtra(node) };
+  // FromJSON treats a missing inline flag as floating. Standard DOCX tables are inline.
+  o.inline ??= true;
   if (!node) return o;
   const g = (t) => kid(node, t);
   if (g("w:tblStyle")) o.tblStyle = g("w:tblStyle").attrs["w:val"];
   if (g("w:tblW")) o.tblW = xmlWidth(g("w:tblW"));
+  const outline = a2i(g("w:outlineLvl")?.attrs["w:val"]);
+  if (Number.isInteger(outline) && outline >= 0 && outline <= 9) o.outlineLvl = outline;
   if (g("w:jc")) o.jc = g("w:jc").attrs["w:val"];
   if (g("w:tblBorders")) o.tblBorders = xmlBorders(g("w:tblBorders"));
   if (g("w:tblCellMar")) o.tblCellMar = xmlMar(g("w:tblCellMar"));
   if (g("w:tblLayout")) o.tblLayout = g("w:tblLayout").attrs["w:type"];
   if (g("w:tblLook")) { const a = g("w:tblLook").attrs; o.tblLook = {}; for (const k of ["firstColumn", "firstRow", "lastColumn", "lastRow", "noHBand", "noVBand"]) if (a["w:" + k] != null) o.tblLook[k] = a["w:" + k] === "1" || a["w:" + k] === "true"; }
-  // tblInd(数字而非宽度对象)/tblOverlap/tblpPr/inline 等 → 由 oo:x 兜底，不在此解析以免写错形态
-  return { ...readExtra(node), ...o };
+  const position = g("w:tblpPr");
+  if (position) {
+    o.inline = false;
+    const props = { ...o.tblpPr };
+    for (const key of ["horzAnchor", "vertAnchor", "tblpXSpec", "tblpYSpec"]) {
+      if (position.attrs["w:" + key] != null) props[key] = position.attrs["w:" + key];
+    }
+    for (const key of ["tblpX", "tblpY", "leftFromText", "rightFromText", "topFromText", "bottomFromText"]) {
+      if (position.attrs["w:" + key] != null) props[key] = Number(position.attrs["w:" + key]);
+    }
+    o.tblpPr = props;
+  }
+  return o;
 }
 function tcPrToJson(node, gaps) {
   const o = { type: "tableCellPr" };
@@ -252,6 +269,8 @@ function trPrToJson(node, gaps) {
   if (!node) return o;
   const g = (t) => kid(node, t);
   if (g("w:tblHeader")) o.tblHeader = true;
+  const outline = a2i(g("w:outlineLvl")?.attrs["w:val"]);
+  if (Number.isInteger(outline) && outline >= 0 && outline <= 9) o.outlineLvl = outline;
   if (g("w:jc")) o.jc = g("w:jc").attrs["w:val"];
   if (g("w:trHeight")) o.trHeight = { val: a2i(g("w:trHeight").attrs["w:val"]), hRule: g("w:trHeight").attrs["w:hRule"] };
   return { ...readExtra(node), ...o };

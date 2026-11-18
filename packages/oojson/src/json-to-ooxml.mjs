@@ -35,6 +35,7 @@ function ppToXml(pPr) {
     x += `<w:ind${attrStr(a)}/>`;
   }
   if (pPr.jc != null) x += `<w:jc w:val="${pPr.jc}"/>`;
+  if (Number.isInteger(pPr.outlineLvl)) x += `<w:outlineLvl w:val="${pPr.outlineLvl}"/>`;
   return x; // 返回 pPr 内层（不含 <w:pPr> 包裹），由 paraToXml 拼上段落 mark rPr + oo:x 后统一包裹
 }
 function rpInner(rPr) {
@@ -285,13 +286,20 @@ function tblPrXml(t) {
   if (!t) return "<w:tblPr/>";
   let x = "";
   if (t.tblStyle != null) x += `<w:tblStyle w:val="${esc(t.tblStyle)}"/>`;
+  if (t.inline === false) {
+    const attrs = {};
+    for (const key of ["horzAnchor", "vertAnchor", "tblpXSpec", "tblpYSpec", "tblpX", "tblpY", "leftFromText", "rightFromText", "topFromText", "bottomFromText"]) {
+      if (t.tblpPr?.[key] != null) attrs["w:" + key] = t.tblpPr[key];
+    }
+    x += `<w:tblpPr${attrStr(attrs)}/>`;
+  }
   x += widthXml("tblW", t.tblW);
   if (t.jc != null) x += `<w:jc w:val="${t.jc}"/>`;
   x += bordersXml("tblBorders", t.tblBorders);
   x += marXml("tblCellMar", t.tblCellMar);
   if (t.tblLayout != null) x += `<w:tblLayout w:type="${typeof t.tblLayout === "object" ? t.tblLayout.type : t.tblLayout}"/>`;
   if (t.tblLook != null && typeof t.tblLook === "object") { const a = {}; for (const k of Object.keys(t.tblLook)) if (k !== "type") a["w:" + k] = t.tblLook[k] === true ? 1 : t.tblLook[k] === false ? 0 : t.tblLook[k]; x += `<w:tblLook${attrStr(a)}/>`; }
-  // tblInd/tblOverlap/tblpPr/inline 等 → 走 oo:x 兜底（形态古怪/非 OOXML 标准，建模易错）
+  // Keep inactive positioning metadata as well, for JSON round-trips.
   return `<w:tblPr${extraAttr(t)}>${x}</w:tblPr>`;
 }
 function cellToXml(c) {

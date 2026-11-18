@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {
   flatOpcToOnlyOfficeWriteback,
   jsonToFlatOpc,
+  ooxmlToJson,
+  jsonToOoxml,
   withPackageLongTailParts,
 } from '../src/index.mjs';
 
@@ -406,6 +408,18 @@ ok('plain Flat OPC produces non-empty bodyJson', () => {
   assert.equal(result.gaps.comments.present, false);
   assert.equal(result.gaps.headersFooters.count, 0);
   assert.equal(result.gaps.media.status, 'pending');
+});
+
+ok('table wrapping survives standard DOCX import and JSON round-trip', () => {
+  const table = props => `<w:tbl>${props}<w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>`;
+  const body = table('') + table('<w:tblPr/>') +
+    table('<w:tblPr><w:tblpPr w:horzAnchor="page" w:tblpX="-120" w:leftFromText="40"/></w:tblPr>');
+  const { doc } = ooxmlToJson(`<w:document><w:body>${body}</w:body></w:document>`);
+  assert.deepEqual(doc.content.map(t => t.tblPr.inline), [true, true, false]);
+  assert.deepEqual(doc.content[2].tblPr.tblpPr, { horzAnchor: 'page', tblpX: -120, leftFromText: 40 });
+  const xml = jsonToOoxml(doc);
+  assert.equal(xml.match(/<w:tblpPr\b/g)?.length, 1);
+  assert.deepEqual(ooxmlToJson(xml).doc.content[2].tblPr, doc.content[2].tblPr);
 });
 
 ok('package-only domains are diagnostics, not host-side parsing work', () => {
