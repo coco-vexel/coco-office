@@ -2,6 +2,14 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.11] - 2026-11-19
+
+### Fixed
+
+- Preserved Word table autofit and cover-page layout in the native editor.
+- Preserved paragraph outline levels and floating table positioning in OOJSON round trips.
+- Preserved percentage widths for tables, table styles and cells during OOXML conversion.
+
 ## [1.0.10] - 2026-11-18
 
 ### Added
@@ -123,6 +131,7 @@ All notable changes to Coco Office are documented in this file.
 
 [1.0.9]: https://github.com/coco-vexel/coco-office/compare/v1.0.8...v1.0.9
 [1.0.10]: https://github.com/coco-vexel/coco-office/compare/v1.0.9...v1.0.10
+[1.0.11]: https://github.com/coco-vexel/coco-office/compare/v1.0.10...v1.0.11
 [1.0.8]: https://github.com/coco-vexel/coco-office/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/coco-vexel/coco-office/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/coco-vexel/coco-office/compare/v1.0.5...v1.0.6
