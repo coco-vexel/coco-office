@@ -422,6 +422,25 @@ ok('table wrapping survives standard DOCX import and JSON round-trip', () => {
   assert.deepEqual(ooxmlToJson(xml).doc.content[2].tblPr, doc.content[2].tblPr);
 });
 
+ok('table and cell percentage widths round-trip between OOXML and ONLYOFFICE', () => {
+  const source = '<w:document><w:body><w:tbl>' +
+    '<w:tblPr><w:tblW w:type="pct" w:w="5001"/></w:tblPr><w:tr>' +
+    '<w:tc><w:tcPr><w:tcW w:type="pct" w:w="22.36%"/></w:tcPr><w:p/></w:tc>' +
+    '<w:tc><w:tcPr><w:tcW w:type="dxa" w:w="3807"/></w:tcPr><w:p/></w:tc>' +
+    '</w:tr></w:tbl></w:body></w:document>';
+  const { doc } = ooxmlToJson(source);
+  const table = doc.content[0];
+  assert.deepEqual(table.tblPr.tblW, { type: 'pct', w: 100.02 });
+  assert.deepEqual(table.content[0].content.map(cell => cell.tcPr.tcW), [
+    { type: 'pct', w: 22.36 },
+    { type: 'dxa', w: 3807 },
+  ]);
+  const xml = jsonToOoxml(doc);
+  assert.match(xml, /<w:tblW w:type="pct" w:w="5001"\/>/);
+  assert.match(xml, /<w:tcW w:type="pct" w:w="1118"\/>/);
+  assert.match(xml, /<w:tcW w:type="dxa" w:w="3807"\/>/);
+});
+
 ok('package-only domains are diagnostics, not host-side parsing work', () => {
   const result = flatOpcToOnlyOfficeWriteback(
     makeFlatOpc([

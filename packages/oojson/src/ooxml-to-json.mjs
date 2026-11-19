@@ -6,6 +6,7 @@ import { parseXml, kid, kidsOf } from "./xml.mjs";
 import { colorToJson, highlightToJson, mergeAutoRgb } from "./color.mjs";
 import { readExtra } from "./extra.mjs";
 import { ooxmlDrawingToJson } from "./ooxml-drawing-to-json.mjs";
+import { tableWidthFromOoxml } from "./table-width.mjs";
 
 // 数值用 Number 而非 parseInt：ONLYOFFICE 宽度等可为小数(如 tcW.w=22.36)，parseInt 会截断丢精度。
 const a2i = (v) => (v == null || v === "" ? null : Number(v));
@@ -215,7 +216,8 @@ function xmlBorders(node) {
 }
 function xmlWidth(node) {
   if (!node) return undefined;
-  return { type: node.attrs["w:type"] || "auto", w: a2i(node.attrs["w:w"]) || 0 };
+  const type = node.attrs["w:type"] || "auto";
+  return { type, w: tableWidthFromOoxml(type, node.attrs["w:w"]) };
 }
 function xmlMar(node) {
   if (!node) return undefined;

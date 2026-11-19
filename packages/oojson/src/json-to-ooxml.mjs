@@ -4,6 +4,7 @@
 import { esc, attrStr } from "./xml.mjs";
 import { colorToOoxml, highlightToOoxml, autoRgbAttr } from "./color.mjs";
 import { extraAttr, onlyKeys } from "./extra.mjs";
+import { tableWidthToOoxml } from "./table-width.mjs";
 
 function shdXml(shd) {
   if (!shd) return "";
@@ -273,7 +274,8 @@ function widthXml(tag, w) {
   if (!w) return "";
   const a = {};
   if (w.type != null) a["w:type"] = w.type;
-  const v = w.w != null ? w.w : w.value; if (v != null) a["w:w"] = v;
+  const v = w.w ?? w.value;
+  if (v != null) a["w:w"] = tableWidthToOoxml(w.type, v);
   return `<w:${tag}${attrStr(a)}/>`;
 }
 function marXml(tag, m) {

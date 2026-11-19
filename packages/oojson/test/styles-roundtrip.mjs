@@ -66,7 +66,7 @@ const styleDefs = [
       pPr: { jc: "both", type: "paraPr" }, rPr: { sz: 21, type: "textPr" }, type: "paragraph" } },
   { styleId: "710", def: { name: "Table Grid", styleType: "tableStyle", type: "style",
       tblPr: {
-        tblW: { type: "pct", w: 5000 },
+        tblW: { type: "pct", w: 100 },
         tblBorders: { top: { val: "single", sz: 4, color: { auto: false, r: 0, g: 0, b: 0 } }, insideH: { val: "single", sz: 4 } },
         tblCellMar: { left: { type: "dxa", w: 108 }, right: { type: "dxa", w: 108 } },
         tblLayout: "fixed",
@@ -104,6 +104,7 @@ ok(stylesXml.includes('<w:vertAlign w:val="superscript"/>'), "样式 rPr 保留�
 ok(stylesXml.includes('<w:spacing w:val="20"/>'), "样式 rPr 保留字符间距");
 ok(stylesXml.includes('<w:lang w:val="en-US" w:eastAsia="zh-CN"'), "样式 rPr 保留语言");
 ok(stylesXml.includes('w:type="table"') && stylesXml.includes('<w:tblPr>'), "表格样式保留 tblPr");
+ok(stylesXml.includes('<w:tblW w:type="pct" w:w="5000"/>'), "表格样式的 100% 宽度写为 5000");
 ok(stylesXml.includes('<w:tblBorders>') && stylesXml.includes('<w:insideH'), "表格样式保留边框");
 ok(stylesXml.includes('<w:tblStylePr w:type="firstRow"'), "表格条件样式保留 firstRow");
 ok(stylesXml.includes('<w:tblStylePr w:type="seCell"'), "OnlyOffice bottomRightCell 映射为 OOXML seCell");
