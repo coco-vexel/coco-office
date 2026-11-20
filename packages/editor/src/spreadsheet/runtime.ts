@@ -10,6 +10,8 @@ import {
   type ExcelWorkbookModel,
   type ExcelBorderModel,
   type ExcelColorModel,
+  type ExcelDrawingAnchorPosition,
+  type ExcelRichTextRun,
   type ExcelAgentTransactionGroupOptions,
   type ExcelHistoryApplyResult,
   type ExcelSheetViewModel,
@@ -359,6 +361,13 @@ export class SpreadsheetEditorRuntime {
     const targetAddress = this.editableCellAddress(address);
     await this.runUserMutation(this.cellEditHistoryGroup(`Set ${targetAddress} formula`, targetAddress, historyOptions), async (tx) => {
       await tx.setCellFormula(this.state.activeSheetName, targetAddress, formula);
+    });
+  }
+
+  async setCellRichText(address: string, runs: readonly ExcelRichTextRun[]): Promise<void> {
+    const targetAddress = this.editableCellAddress(address);
+    await this.runUserMutation({ label: `Set ${targetAddress}` }, async (tx) => {
+      await tx.setCellRichText(this.state.activeSheetName, targetAddress, runs);
     });
   }
 
@@ -1066,6 +1075,24 @@ export class SpreadsheetEditorRuntime {
           anchor.to.setRowOffset(position.to.rowOffset);
           anchor.to.setColumnOffset(position.to.columnOffset);
         }
+      });
+    });
+  }
+
+  async setDrawingPosition(
+    sheetId: string,
+    drawingIndex: number,
+    anchorIndex: number,
+    position: ExcelDrawingAnchorPosition,
+  ): Promise<void> {
+    const sheet = this.activeSheet().source;
+    if (sheet.id !== sheetId) return;
+    const object = sheet.drawings[drawingIndex]?.anchors[anchorIndex]?.object;
+    if (object?.hidden || (object?.kind !== 'image' && object?.kind !== 'shape')) return;
+    await this.runUserMutation({ label: 'Position drawing' }, async (tx) => {
+      await tx.runSnapshot('Position drawing', 'spreadsheet drawing position', async () => {
+        const drawings = await this.state.workbook.worksheets.getItem(sheet.name).drawings.items();
+        await drawings[drawingIndex]?.anchors.getItem(anchorIndex).setPosition(position);
       });
     });
   }

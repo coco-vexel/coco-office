@@ -96,7 +96,7 @@ const INDEXED_COLORS = [
   '333333',
 ] as const;
 
-type ThemeColors = Map<number, ExcelColorModel>;
+export type ThemeColors = Map<number, ExcelColorModel>;
 
 function firstChildNs(parent: Element, ns: string, localName: string): Element | null {
   return parent.getElementsByTagNameNS(ns, localName)[0] ?? null;
@@ -145,7 +145,7 @@ function parseColor(
   return color ? applyExcelTint(color, parseOptionalNumber(el.getAttribute('tint'))) : undefined;
 }
 
-function parseThemeColors(pkg: Package): ThemeColors {
+export function parseThemeColors(pkg: Package): ThemeColors {
   const themeColors: ThemeColors = new Map();
   const themeDom = getPart(pkg, 'xl/theme/theme1.xml')?.xmlDom;
   if (!themeDom) return themeColors;
@@ -156,11 +156,15 @@ function parseThemeColors(pkg: Package): ThemeColors {
       (element) => element.parentElement === scheme,
     );
     const source = slot?.firstElementChild;
-    const raw = source?.getAttribute('val') ?? source?.getAttribute('lastClr') ?? undefined;
+    const raw = source?.getAttribute('lastClr') ?? source?.getAttribute('val') ?? undefined;
     const color = ooxmlArgbToExcelColor(raw);
     if (color) themeColors.set(index, color);
   });
   return themeColors;
+}
+
+export function themeColorByName(themeColors: ThemeColors, name: string): ExcelColorModel | undefined {
+  return themeColors.get(THEME_COLOR_ORDER.findIndex((item) => item === name));
 }
 
 function parseValNumber(parent: Element, name: string): number | undefined {
@@ -203,19 +207,29 @@ function parseNumberFormats(stylesDom: Document): {
 function parseFonts(stylesDom: Document, themeColors: ThemeColors): ExcelFontModel[] {
   const fontsEl = stylesDom.getElementsByTagNameNS(SS_NS, 'fonts')[0];
   if (!fontsEl) return [];
-  return childElementsNs(fontsEl, SS_NS, 'font').map((fontEl) => {
-    const font: ExcelFontModel = {};
-    setIfDefined(font, 'name', parseValString(fontEl, 'name'));
-    setIfDefined(font, 'size', parseValNumber(fontEl, 'sz'));
-    setIfDefined(font, 'family', parseValNumber(fontEl, 'family'));
-    setIfDefined(font, 'charset', parseValNumber(fontEl, 'charset'));
-    setIfDefined(font, 'scheme', parseValString(fontEl, 'scheme'));
-    setIfDefined(font, 'bold', firstChildNs(fontEl, SS_NS, 'b') ? true : undefined);
-    setIfDefined(font, 'italic', firstChildNs(fontEl, SS_NS, 'i') ? true : undefined);
-    setIfDefined(font, 'underline', firstChildNs(fontEl, SS_NS, 'u') ? true : undefined);
-    setIfDefined(font, 'color', parseColor(firstChildNs(fontEl, SS_NS, 'color'), themeColors));
-    return font;
-  });
+  return childElementsNs(fontsEl, SS_NS, 'font').map((element) => parseFontProperties(element, themeColors));
+}
+
+export function parseFontProperties(
+  element: Element,
+  themeColors: ThemeColors,
+  nameTag: 'name' | 'rFont' = 'name',
+): ExcelFontModel {
+  const font: ExcelFontModel = {};
+  setIfDefined(font, 'name', parseValString(element, nameTag));
+  setIfDefined(font, 'size', parseValNumber(element, 'sz'));
+  setIfDefined(font, 'family', parseValNumber(element, 'family'));
+  setIfDefined(font, 'charset', parseValNumber(element, 'charset'));
+  setIfDefined(font, 'scheme', parseValString(element, 'scheme'));
+  for (const [tag, key] of [['b', 'bold'], ['i', 'italic'], ['u', 'underline']] as const) {
+    const property = firstChildNs(element, SS_NS, tag);
+    if (property) {
+      const value = property.getAttribute('val');
+      font[key] = value !== '0' && value !== 'false' && value !== 'none';
+    }
+  }
+  setIfDefined(font, 'color', parseColor(firstChildNs(element, SS_NS, 'color'), themeColors));
+  return font;
 }
 
 function parseFills(stylesDom: Document, themeColors: ThemeColors): ExcelFillModel[] {
@@ -344,11 +358,10 @@ function builtInNumberFormatCode(id: number): string | undefined {
   return builtIns[id];
 }
 
-export function parseStyles(pkg: Package): ExcelStylesModel {
+export function parseStyles(pkg: Package, themeColors = parseThemeColors(pkg)): ExcelStylesModel {
   const part = getPart(pkg, 'xl/styles.xml');
   if (!part?.xmlDom) return emptyStyles();
   const numberFormats = parseNumberFormats(part.xmlDom);
-  const themeColors = parseThemeColors(pkg);
   return {
     numberFormats: numberFormats.list,
     fonts: parseFonts(part.xmlDom, themeColors),

@@ -2,6 +2,8 @@ import type { Package, Part } from '../pack/index.js';
 import { getPart } from '../pack/index.js';
 import type { ExcelDefinedNameModel } from './model.js';
 import { OFFICE_REL_NS, REL_NS, SS_NS } from './namespaces.js';
+import { readExcelStringContent, type ExcelStringContent } from './rich-text.js';
+import type { ThemeColors } from './styles-reader.js';
 
 interface Relationship {
   id: string;
@@ -134,20 +136,15 @@ export function parseDefinedNames(pkg: Package): ExcelDefinedNameModel[] {
   return result;
 }
 
-export function parseSharedStrings(pkg: Package): string[] {
+export function parseSharedStrings(pkg: Package, themeColors: ThemeColors): ExcelStringContent[] {
   const part = optionalXmlPart(pkg, 'xl/sharedStrings.xml');
   if (!part?.xmlDom) return [];
-  const strings: string[] = [];
+  const strings: ExcelStringContent[] = [];
   const siEls = part.xmlDom.getElementsByTagNameNS(SS_NS, 'si');
   for (let i = 0; i < siEls.length; i++) {
     const si = siEls[i];
     if (!si) continue;
-    const tEls = si.getElementsByTagNameNS(SS_NS, 't');
-    let text = '';
-    for (let j = 0; j < tEls.length; j++) {
-      text += textOf(tEls[j]);
-    }
-    strings.push(text);
+    strings.push(readExcelStringContent(si, themeColors));
   }
   return strings;
 }

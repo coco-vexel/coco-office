@@ -6,6 +6,7 @@ import type {
   ExcelConditionalFormatRuleModel,
   ExcelDataValidationModel,
   ExcelDrawingAnchorModel,
+  ExcelDrawingAnchorPosition,
   ExcelDrawingMarkerModel,
   ExcelDrawingModel,
   ExcelHyperlinkModel,
@@ -924,12 +925,7 @@ export class ExcelDrawingCollection {
   toModel(): ExcelDrawingModel[] {
     return this.getModels().map((drawing) => ({
       ...drawing,
-      anchors: drawing.anchors.map((anchor) => ({
-        ...anchor,
-        from: anchor.from ? { ...anchor.from } : undefined,
-        to: anchor.to ? { ...anchor.to } : undefined,
-        object: anchor.object ? { ...anchor.object } : undefined,
-      })),
+      anchors: drawing.anchors.map(cloneDrawingAnchor),
     }));
   }
 }
@@ -984,6 +980,17 @@ export class ExcelDrawingAnchor {
   constructor(private readonly model: ExcelDrawingAnchorModel) {
     this.from = new ExcelDrawingMarker(() => (this.model.from ??= {}));
     this.to = new ExcelDrawingMarker(() => (this.model.to ??= {}));
+  }
+
+  setPosition(position: ExcelDrawingAnchorPosition): void {
+    if (position.kind !== this.model.kind) throw new Error('Cannot change the drawing anchor type');
+    this.model.from = position.from && { ...position.from };
+    this.model.to = position.to && { ...position.to };
+    this.model.x = position.x;
+    this.model.y = position.y;
+    this.model.width = position.width;
+    this.model.height = position.height;
+    this.model.transform = position.transform && { ...position.transform };
   }
 
   kind(): ExcelDrawingAnchorModel['kind'] {
@@ -1334,11 +1341,12 @@ function cloneDrawing(drawing: ExcelDrawingModel): ExcelDrawingModel {
   };
 }
 
-function cloneDrawingAnchor(anchor: ExcelDrawingAnchorModel): ExcelDrawingAnchorModel {
+export function cloneDrawingAnchor(anchor: ExcelDrawingAnchorModel): ExcelDrawingAnchorModel {
   return {
     ...anchor,
     from: anchor.from ? { ...anchor.from } : undefined,
     to: anchor.to ? { ...anchor.to } : undefined,
+    transform: anchor.transform ? { ...anchor.transform } : undefined,
     object: anchor.object ? { ...anchor.object } : undefined,
   };
 }

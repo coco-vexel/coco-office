@@ -2,6 +2,11 @@ export type ExcelCellValue = string | number | boolean | null;
 
 export type ExcelCellKind = 'blank' | 'string' | 'number' | 'boolean' | 'formula' | 'error';
 
+export interface ExcelRichTextRun {
+  text: string;
+  font?: ExcelFontModel;
+}
+
 export interface ExcelCellModel {
   /** A1-style address, for example `C12`. */
   address: string;
@@ -11,6 +16,8 @@ export interface ExcelCellModel {
   column: number;
   kind: ExcelCellKind;
   value: ExcelCellValue;
+  /** Styled runs for a string cell. Value remains the concatenated plain text. */
+  richText?: ExcelRichTextRun[];
   /** Raw `<v>` text, before shared-string / boolean / number conversion. */
   rawValue?: string;
   /** Formula text without the leading `=`. */
@@ -205,12 +212,29 @@ export interface ExcelDrawingObjectModel {
   relationshipId?: string;
   targetPath?: string;
   targetMode?: string;
+  hidden?: boolean;
+  presetGeometry?: string;
+  fillColor?: string;
+  lineColor?: string;
+  /** DrawingML outline width in EMUs. */
+  lineWidth?: number;
 }
 
-export interface ExcelDrawingAnchorModel {
+export interface ExcelDrawingAnchorPosition {
   kind: 'oneCell' | 'twoCell' | 'absolute';
   from?: ExcelDrawingMarkerModel;
   to?: ExcelDrawingMarkerModel;
+  /** Absolute origin in EMUs. */
+  x?: number;
+  y?: number;
+  /** Fixed extent in EMUs. */
+  width?: number;
+  height?: number;
+  /** Picture or shape transform in drawing coordinates, measured in EMUs. */
+  transform?: { x?: number; y?: number; width?: number; height?: number };
+}
+
+export interface ExcelDrawingAnchorModel extends ExcelDrawingAnchorPosition {
   object?: ExcelDrawingObjectModel;
 }
 

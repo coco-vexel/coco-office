@@ -58,7 +58,7 @@ export type {
   ExcelScriptApiReceiver,
   ExcelScriptApiReceiverMap,
 } from './script-api-contract.js';
-export { readWorkbookModel } from './xlsx-reader.js';
+export { readExcelEmbeddedObjectPreviews, readWorkbookModel } from './xlsx-reader.js';
 export { captureExcelCellStyle, equalExcelCellStyles, importExcelCellStyles, type ExcelCellStyleSnapshot } from './cell-style.js';
 export {
   columnIndexToName,
@@ -259,6 +259,8 @@ export {
   type ExcelDataValidationModel,
   type ExcelDefinedNameModel,
   type ExcelDrawingAnchorModel,
+  type ExcelDrawingAnchorPosition,
+  type ExcelRichTextRun,
   type ExcelDrawingMarkerModel,
   type ExcelDrawingModel,
   type ExcelDrawingObjectModel,

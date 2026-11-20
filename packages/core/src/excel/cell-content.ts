@@ -24,7 +24,12 @@ export function clearExcelCellContent(
   cell.kind = 'blank';
   cell.value = null;
   delete cell.formula;
+  clearExcelCellStringMetadata(cell);
+}
+
+export function clearExcelCellStringMetadata(cell: ExcelCellModel): void {
   delete cell.rawValue;
   delete cell.dataType;
   delete cell.sharedStringIndex;
+  delete cell.richText;
 }

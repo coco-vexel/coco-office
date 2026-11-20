@@ -14,11 +14,13 @@ import type {
   ExcelColorModel,
   ExcelFillModel,
   ExcelFontModel,
+  ExcelRichTextRun,
   ExcelSheetModel,
   ExcelStylesModel,
 } from './model.js';
 import { normalizeExcelColor } from './color.js';
-import { clearExcelCellContent, normalizeExcelCellFormula } from './cell-content.js';
+import { clearExcelCellContent, clearExcelCellStringMetadata, normalizeExcelCellFormula } from './cell-content.js';
+import { cloneExcelCell, cloneExcelRichText } from './rich-text.js';
 import type {
   ExcelMutationRecorder,
   ExcelRangeSetBorderMutation,
@@ -388,10 +390,23 @@ export class ExcelRange {
       for (let c = 0; c < this.ref.columnCount; c++) {
         const address = formatCellAddress(this.ref.startRow + r, this.ref.startColumn + c);
         const cell = this.cellsByAddress.get(address);
-        if (cell) cells.push({ ...cell });
+        if (cell) cells.push(cloneExcelCell(cell));
       }
     }
     return cells;
+  }
+
+  setRichText(runs: readonly ExcelRichTextRun[]): void {
+    if (this.ref.rowCount !== 1 || this.ref.columnCount !== 1) {
+      throw new Error('ExcelRange.setRichText requires a single cell');
+    }
+    const address = formatCellAddress(this.ref.startRow, this.ref.startColumn);
+    this.setCellValue(address, runs.map((run) => run.text).join(''));
+    if (runs.length > 0) this.ensureCell(address).richText = cloneExcelRichText(runs);
+    this.recordMutation?.({
+      kind: 'unsafe', scope: 'range', sheetId: this.sheet.id, sheetName: this.sheet.name,
+      reason: 'Rich text requires package writeback',
+    });
   }
 
   getResolvedFormat(): ExcelCellFormatModel {
@@ -519,9 +534,7 @@ export class ExcelRange {
     cell.kind =
       typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'string';
     delete cell.formula;
-    delete cell.rawValue;
-    delete cell.dataType;
-    delete cell.sharedStringIndex;
+    clearExcelCellStringMetadata(cell);
   }
 
   private setCellFormula(address: string, formula: string | null): void {
@@ -533,9 +546,7 @@ export class ExcelRange {
     cell.kind = 'formula';
     cell.formula = formula;
     cell.value = null;
-    delete cell.rawValue;
-    delete cell.dataType;
-    delete cell.sharedStringIndex;
+    clearExcelCellStringMetadata(cell);
   }
 
   private ensureCell(address: string): ExcelCellModel {
@@ -651,7 +662,7 @@ export class ExcelCell {
   }
 
   toModel(): ExcelCellModel | null {
-    return this.range.toModel()[0] ? { ...this.range.toModel()[0]! } : null;
+    return this.range.toModel()[0] ?? null;
   }
 }
 

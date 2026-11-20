@@ -251,6 +251,34 @@ async function makeWorkbookWithoutLegacyComments(): Promise<Uint8Array> {
 }
 
 describe('ExcelWorkbook', () => {
+  test('retains shared and inline rich text when rewriting worksheet styles', async () => {
+    const zip = await JSZip.loadAsync(await makeWorkbook());
+    const rich = '<r><rPr><rFont val="Aptos"/><b/><u/><sz val="14"/><color rgb="FFFFFF00"/></rPr><t>Heading</t></r>'
+      + '<r><rPr><b val="0"/><sz val="10"/><color rgb="FFFFFFFF"/></rPr><t xml:space="preserve">\nBody &amp; notes</t></r>';
+    zip.file('xl/sharedStrings.xml', SHARED_STRINGS_XML.replace('<r><t>rich</t></r><r><t> text</t></r>', rich));
+    zip.file('xl/worksheets/sheet1.xml', SHEET_XML.replace('</sheetData>', `<row r="4"><c r="A4" t="inlineStr"><is>${rich}</is></c></row></sheetData>`));
+    const workbook = await ExcelWorkbook.fromZip(await zip.generateAsync({ type: 'uint8array' }));
+    const sheet = workbook.worksheets.getItem('Sheet1');
+    const expected = [
+      { text: 'Heading', font: { name: 'Aptos', bold: true, underline: true, size: 14, color: { rgb: '#FFFF00' } } },
+      { text: '\nBody & notes', font: { bold: false, size: 10, color: { rgb: '#FFFFFF' } } },
+    ];
+    for (const address of ['D2', 'A4']) {
+      expect(sheet.getCell(address).value()).toBe('Heading\nBody & notes');
+      expect(sheet.getCell(address).toModel()?.richText).toStrictEqual(expected);
+    }
+    sheet.getRange('B2').format.font.setBold(true);
+    const reopened = await ExcelWorkbook.fromZip(await workbook.toZip());
+    const saved = reopened.worksheets.getItem('Sheet1');
+    for (const address of ['D2', 'A4']) {
+      expect(saved.getCell(address).toModel()?.richText).toStrictEqual(expected);
+    }
+    saved.getCell('D2').setValue('Replacement');
+    expect(saved.getCell('D2').toModel()?.richText).toBeUndefined();
+    saved.getCell('A4').clear();
+    expect(saved.getCell('A4').toModel()?.richText).toBeUndefined();
+  });
+
   test('fromZip reads workbook sheets, shared strings, cells and formulas', async () => {
     const doc = await ExcelWorkbook.fromZip(await makeWorkbook(), { workbookId: 'test.xlsx' });
     const model = doc.toModel();

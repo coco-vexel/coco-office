@@ -1,4 +1,6 @@
 import type { ExcelCellModel, ExcelSheetModel, ExcelStylesModel, ExcelWorkbookModel } from './model.js';
+import { cloneDrawingAnchor } from './objects.js';
+import { cloneExcelCell as cloneCell } from './rich-text.js';
 
 export type ExcelWritebackStrategy =
   | 'no-op'
@@ -357,10 +359,6 @@ function cloneCellDiff(diff: ExcelCellDiff): ExcelCellDiff {
   };
 }
 
-function cloneCell(cell: ExcelCellModel): ExcelCellModel {
-  return { ...cell };
-}
-
 function cloneStyles(styles: ExcelStylesModel): ExcelStylesModel {
   return {
     numberFormats: styles.numberFormats.map((format) => ({ ...format })),
@@ -432,12 +430,7 @@ function cloneSheet(sheet: ExcelSheetModel): ExcelSheetModel {
     threadedComments: sheet.threadedComments.map((comment) => ({ ...comment })),
     drawings: sheet.drawings.map((drawing) => ({
       ...drawing,
-      anchors: drawing.anchors.map((anchor) => ({
-        ...anchor,
-        from: anchor.from ? { ...anchor.from } : undefined,
-        to: anchor.to ? { ...anchor.to } : undefined,
-        object: anchor.object ? { ...anchor.object } : undefined,
-      })),
+      anchors: drawing.anchors.map(cloneDrawingAnchor),
     })),
     charts: sheet.charts.map((chart) => ({ ...chart, formulaRefs: [...chart.formulaRefs] })),
     images: sheet.images.map((image) => ({ ...image })),

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import JSZip from 'jszip';
 import { captureExcelCellStyle, ExcelWorkbook } from '@coco-vexel/coco-office/excel';
 import { SPREADSHEET_CLIPBOARD_MIME } from '../clipboard.js';
 import {
@@ -126,11 +127,214 @@ function pressKey(host: HTMLElement, key: string, options: KeyboardEventInit = {
   return event;
 }
 
+test('paints styled runs inside a merged cell and redraws them past the anchor row', async () => {
+  const paints: Array<{ text: string; y: number; font: string; color: CanvasRenderingContext2D['fillStyle'] }> = [];
+  const mock = vi.mocked(HTMLCanvasElement.prototype.getContext);
+  const createContext = mock.getMockImplementation()!;
+  mock.mockImplementation(function (this: HTMLCanvasElement, ...args) {
+    const ctx = createContext.apply(this, args) as CanvasRenderingContext2D;
+    ctx.fillText = (text, _x, y) => paints.push({ text, y, font: ctx.font, color: ctx.fillStyle });
+    return ctx;
+  });
+  const { editor, host } = await setup({}, async (workbook) => {
+    await workbook.executeCode(`
+      const sheet = workbook.worksheets.getItem('Sheet1');
+      sheet.getRange('B4:E14').merge();
+      const cell = sheet.getRange('B4');
+      cell.format.font.setValue({ size: 14, bold: true, color: { rgb: '#FFFF00' } });
+      cell.format.alignment.setValue({ vertical: 'center', horizontal: 'left', wrapText: true });
+      cell.setRichText([
+        { text: 'Heading', font: { size: 14, bold: true, underline: true, color: { rgb: '#FFFF00' } } },
+        { text: '\\nBody', font: { size: 10, color: { rgb: '#FFFFFF' } } },
+      ]);
+    `);
+  });
+  const layout = new SpreadsheetLayout(editor.runtime().activeSheet());
+  const heading = paints.find((paint) => paint.text === 'Heading');
+  const body = paints.find((paint) => paint.text === 'Body');
+  expect(heading).toMatchObject({ font: expect.stringContaining('600 14pt'), color: '#FFFF00' });
+  expect(body).toMatchObject({ font: expect.stringMatching(/^10pt/), color: '#FFFFFF' });
+  expect(heading!.y).toBeGreaterThan(layout.getRowY(4) + layout.columnHeaderHeight);
+  expect(body!.y).toBeGreaterThan(heading!.y);
+
+  paints.length = 0;
+  host.dispatchEvent(new WheelEvent('wheel', { deltaY: 90, bubbles: true, cancelable: true }));
+  expect(paints.find((paint) => paint.text === 'Body')?.y).toBeGreaterThan(layout.columnHeaderHeight);
+  await editor.setCellValue('B4', 'Replacement');
+  await editor.undo();
+  expect(editor.runtime().activeSheet().cellsByAddress.get('B4')?.source.richText).toHaveLength(2);
+  const reopened = await ExcelWorkbook.fromZip(await editor.toZip(), { mode: 'inline' });
+  expect((await reopened.worksheets.getItem('Sheet1').getCell('B4').toModel())?.richText).toHaveLength(2);
+  await reopened.dispose();
+});
+
+test('selects and resizes drawings only in editable mode and preserves worksheet XML on export', async () => {
+  const { editor, host, root } = await setup();
+  const zip = await JSZip.loadAsync(await editor.toZip());
+  const sheetPath = 'xl/worksheets/sheet1.xml';
+  const officeRel = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const packageRel = 'http://schemas.openxmlformats.org/package/2006/relationships';
+  const sheet = (await zip.file(sheetPath)!.async('string')).replace('</worksheet>',
+    '<drawing r:id="rId1"/><extLst><ext uri="keep-on-drawing-edit"/></extLst></worksheet>');
+  zip.file(sheetPath, sheet);
+  zip.file('xl/worksheets/_rels/sheet1.xml.rels',
+    `<Relationships xmlns="${packageRel}"><Relationship Id="rId1" Type="${officeRel}/drawing" Target="../drawings/drawing1.xml"/></Relationships>`);
+  zip.file('xl/drawings/drawing1.xml', `
+    <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+      xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+      <xdr:oneCellAnchor>
+        <xdr:from><xdr:col>1</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
+        <xdr:ext cx="952500" cy="381000"/>
+        <xdr:sp>
+          <xdr:nvSpPr><xdr:cNvPr id="2" name="Arrow"/><xdr:cNvSpPr/></xdr:nvSpPr>
+          <xdr:spPr><a:prstGeom prst="rightArrow"><a:avLst/></a:prstGeom></xdr:spPr>
+        </xdr:sp>
+        <xdr:clientData/>
+      </xdr:oneCellAnchor>
+    </xdr:wsDr>`);
+  const contentTypes = await zip.file('[Content_Types].xml')!.async('string');
+  zip.file('[Content_Types].xml', contentTypes.replace('</Types>',
+    '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>'));
+  await editor.loadWorkbook(await zip.generateAsync({ type: 'uint8array' }));
+
+  const arrow = () => root.querySelector<HTMLElement>('.coco-spreadsheet-drawing-preview')!;
+  const handles = () => root.querySelectorAll('.coco-spreadsheet-drawing-resize-handle');
+  const width = () => Number.parseFloat(arrow().style.width);
+  const height = () => Number.parseFloat(arrow().style.height);
+  const position = (element: HTMLElement) => ({
+    x: Number.parseFloat(element.style.left) + 4,
+    y: Number.parseFloat(element.style.top) + 4,
+  });
+  const pointer = (type: string, x: number, y: number) =>
+    host.dispatchEvent(new PointerEvent(type, { pointerId: 1, button: 0, clientX: x, clientY: y, bubbles: true }));
+  const start = position(arrow());
+  const startWidth = width();
+  const startHeight = height();
+  pointer('pointerdown', start.x + 20, start.y + 12);
+  pointer('pointerup', start.x + 20, start.y + 12);
+  expect(handles()).toHaveLength(8);
+  expect(editor.canUndo()).toBe(false);
+
+  const handle = root.querySelector<HTMLElement>('[data-handle="se"]')!;
+  const corner = position(handle);
+  pointer('pointerdown', corner.x, corner.y);
+  pointer('pointermove', corner.x + 20, corner.y + 10);
+  pointer('pointerup', corner.x + 20, corner.y + 10);
+  await editor.flushEdits();
+  expect(width()).toBeCloseTo(startWidth + 20);
+  expect(height()).toBeCloseTo(startHeight + 10);
+  const saved = await JSZip.loadAsync(await editor.toZip());
+  expect(await saved.file(sheetPath)!.async('string')).toBe(sheet);
+  const layout = new SpreadsheetLayout(editor.runtime().activeSheet());
+  const horizontal = layout.cssPixelsToEmu(startWidth + 20);
+  const vertical = layout.cssPixelsToEmu(startHeight + 10);
+  expect(await saved.file('xl/drawings/drawing1.xml')!.async('string')).toContain(`cx="${horizontal}" cy="${vertical}"`);
+  await editor.undo();
+  expect(width()).toBe(startWidth);
+  await editor.redo();
+  expect(width()).toBeCloseTo(startWidth + 20);
+
+  editor.setReadOnly(true);
+  expect(handles()).toHaveLength(0);
+  pointer('pointerdown', start.x + 20, start.y + 12);
+  pointer('pointermove', start.x + 45, start.y + 20);
+  pointer('pointerup', start.x + 45, start.y + 20);
+  await editor.flushEdits();
+  expect(handles()).toHaveLength(0);
+  expect(position(arrow())).toEqual(start);
+});
+
 function cellPoint(editor: SpreadsheetEditor, row: number, column: number) {
   const layout = new SpreadsheetLayout(editor.runtime().activeSheet());
   const rect = layout.getCellLogicalRect(row, column);
   return { clientX: layout.rowHeaderWidth + rect.x + rect.width / 2, clientY: layout.columnHeaderHeight + rect.y + rect.height / 2 };
 }
+
+test('double-clicking a merged rich-text cell keeps its fill and styles while editing', async () => {
+  const onChange = vi.fn();
+  const runs = [
+    { text: '\n\nHeading', font: { size: 14, bold: true, color: { rgb: '#FFFF00' } } },
+    { text: '\nBody', font: { size: 10, underline: true, color: { rgb: '#FFFFFF' } } },
+  ];
+  const { editor, host, root } = await setup({ onChange }, async (workbook) => {
+    const sheet = workbook.worksheets.getItem('Sheet1');
+    await sheet.getRange('B4:E14').merge();
+    await sheet.getRange('B4:E14').format.fill.setForegroundColor({ rgb: '#351BFB' });
+    await sheet.getRange('B4').setRichText(runs);
+  });
+  const frame = root.querySelector<HTMLElement>('.coco-spreadsheet-rich-editor')!;
+  const input = frame.querySelector<HTMLElement>('[contenteditable]')!;
+  const open = async () => {
+    host.dispatchEvent(new MouseEvent('dblclick', { ...cellPoint(editor, 8, 3), bubbles: true, composed: true }));
+    await vi.waitFor(() => expect(frame.style.display).toBe('flex'));
+  };
+  await open();
+  expect(frame.style.backgroundColor.toLowerCase()).toBe('#351bfb');
+  expect(frame.scrollTop).toBe(0);
+  expect(input.textContent).toBe('\n\nHeading\nBody');
+  expect(input.children[0]).toHaveProperty('style.color', '#FFFF00');
+  expect(input.children[1]).toHaveProperty('style.color', '#FFFFFF');
+  expect(input.children[1]).toHaveProperty('style.textDecoration', 'underline');
+  pressKey(input, 'Enter');
+  await editor.flushEdits();
+  expect(onChange).not.toHaveBeenCalled();
+
+  await open();
+  input.children[1]!.textContent = '\nEdited body';
+  input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  pressKey(input, 'Enter');
+  await editor.flushEdits();
+  const current = () => editor.runtime().activeSheet().cellsByAddress.get('B4')?.source.richText;
+  const expected = [runs[0], { ...runs[1], text: '\nEdited body' }];
+  expect(current()).toEqual(expected);
+  const reopened = await ExcelWorkbook.fromZip(await editor.toZip(), { mode: 'inline' });
+  expect((await reopened.worksheets.getItem('Sheet1').getCell('B4').toModel())?.richText).toEqual(expected);
+  await reopened.dispose();
+  await editor.undo();
+  expect(current()).toEqual(runs);
+});
+
+test('keeps a merged range selection after mouse release and click', async () => {
+  const { editor, host } = await setup({}, (workbook) => workbook.worksheets.getItem('Sheet1').getRange('B2:C3').merge());
+  const pointer = (type: string, row: number, column: number) =>
+    host.dispatchEvent(new PointerEvent(type, { ...cellPoint(editor, row, column), pointerId: 1, button: 0, bubbles: true }));
+  pointer('pointerdown', 3, 3);
+  pointer('pointermove', 5, 5);
+  pointer('pointerup', 5, 5);
+  host.dispatchEvent(new MouseEvent('click', { ...cellPoint(editor, 5, 5), bubbles: true }));
+  expect(editor.selection().range).toEqual({ startRow: 2, startColumn: 2, endRow: 5, endColumn: 5 });
+  pointer('pointerdown', 6, 6);
+  pointer('pointerup', 6, 6);
+  host.dispatchEvent(new MouseEvent('click', { ...cellPoint(editor, 6, 6), bubbles: true }));
+  expect(editor.selection().range).toEqual({ startRow: 6, startColumn: 6, endRow: 6, endColumn: 6 });
+});
+
+test('suppresses gridlines on filled cells and still paints explicit borders', async () => {
+  const grid: Array<{ x: number; y: number }> = [];
+  const strokes: Array<CanvasRenderingContext2D['strokeStyle']> = [];
+  const mock = vi.mocked(HTMLCanvasElement.prototype.getContext);
+  const createContext = mock.getMockImplementation()!;
+  mock.mockImplementation(function (this: HTMLCanvasElement, ...args) {
+    const ctx = createContext.apply(this, args) as CanvasRenderingContext2D;
+    ctx.strokeRect = (x, y) => { if (ctx.strokeStyle === '#E5E7EB') grid.push({ x, y }); };
+    ctx.stroke = () => strokes.push(ctx.strokeStyle);
+    return ctx;
+  });
+  const { editor } = await setup({}, async (workbook) => {
+    const sheet = workbook.worksheets.getItem('Sheet1');
+    await sheet.getRange('B2:C2').format.fill.setForegroundColor({ rgb: '#351BFB' });
+    await sheet.getRange('C2').format.border.setValue({ bottom: { style: 'thin', color: { rgb: '#FF0000' } } });
+  });
+  const layout = new SpreadsheetLayout(editor.runtime().activeSheet());
+  const gridStart = (column: number) => ({
+    x: layout.rowHeaderWidth + layout.getColumnX(column) + 0.5,
+    y: layout.columnHeaderHeight + layout.getRowY(2) + 0.5,
+  });
+  expect(grid).toContainEqual(gridStart(1));
+  expect(grid).not.toContainEqual(gridStart(2));
+  expect(grid).not.toContainEqual(gridStart(3));
+  expect(strokes).toContain('#FF0000');
+});
 
 function copyCells(host: HTMLElement, kind: 'copy' | 'cut' = 'copy') {
   const data = new DataTransfer();

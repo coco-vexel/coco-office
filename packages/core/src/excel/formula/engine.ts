@@ -1,5 +1,5 @@
 import type { ExcelCellModel, ExcelCellValue, ExcelSheetModel } from '../model.js';
-import { clearExcelCellContent, normalizeExcelCellFormula } from '../cell-content.js';
+import { clearExcelCellContent, clearExcelCellStringMetadata, normalizeExcelCellFormula } from '../cell-content.js';
 import { evaluateSpreadsheetFormulaAst } from './evaluator.js';
 import { parseSpreadsheetFormula } from './parser.js';
 import {
@@ -280,9 +280,7 @@ export class SpreadsheetFormulaEngine {
     cell.kind =
       typeof value === 'boolean' ? 'boolean' : typeof value === 'number' ? 'number' : 'string';
     delete cell.formula;
-    delete cell.rawValue;
-    delete cell.dataType;
-    delete cell.sharedStringIndex;
+    clearExcelCellStringMetadata(cell);
   }
 
   private setCellFormula(address: string, formula: string | null): void {
@@ -294,9 +292,7 @@ export class SpreadsheetFormulaEngine {
     cell.kind = 'formula';
     cell.formula = formula;
     cell.value = null;
-    delete cell.rawValue;
-    delete cell.dataType;
-    delete cell.sharedStringIndex;
+    clearExcelCellStringMetadata(cell);
   }
 
   private ensureCell(address: string): ExcelCellModel {

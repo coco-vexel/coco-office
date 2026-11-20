@@ -50,6 +50,20 @@ export function buildSpreadsheetSheetRenderModel(
     maxColumn = Math.max(maxColumn, column.max);
   }
 
+  for (const drawing of sheet.drawings) {
+    for (const anchor of drawing.anchors) {
+      if (anchor.object?.hidden) continue;
+      for (const marker of [anchor.from, anchor.to]) {
+        if (marker?.row !== undefined && marker.row >= 0 && marker.row < 1_048_576) {
+          maxRow = Math.max(maxRow, Math.floor(marker.row) + 1);
+        }
+        if (marker?.column !== undefined && marker.column >= 0 && marker.column < 16_384) {
+          maxColumn = Math.max(maxColumn, Math.floor(marker.column) + 1);
+        }
+      }
+    }
+  }
+
   for (const cell of sheet.cells) {
     const renderCell = toRenderCell(cell, styles, options.formulaResults, options.date1904);
     cellsByAddress.set(cell.address, renderCell);

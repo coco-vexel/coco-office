@@ -21,6 +21,7 @@ import type {
   ExcelConditionalFormatModel,
   ExcelColorModel,
   ExcelDataValidationModel,
+  ExcelDrawingAnchorModel,
   ExcelDrawingMarkerModel,
   ExcelDrawingModel,
   ExcelFillModel,
@@ -39,6 +40,7 @@ import type {
   ExcelWorkbookModel,
 } from './model.js';
 import { excelColorToOoxmlArgb } from './color.js';
+import { excelCellRichText, serializeExcelRichText } from './rich-text.js';
 
 const XML_DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
 const CONTENT_TYPES_NS = 'http://schemas.openxmlformats.org/package/2006/content-types';
@@ -781,6 +783,8 @@ function serializeCell(cell: ExcelCellModel): string {
   const formula = cell.formula ? `<f>${xmlText(cell.formula)}</f>` : '';
   if (cell.kind === 'string') {
     attrs.push('t="inlineStr"');
+    const richText = excelCellRichText(cell);
+    if (richText) return `<c ${attrs.join(' ')}>${serializeExcelRichText(richText)}</c>`;
     const text = String(cell.value ?? '');
     const preserveSpace = /^\s|\s$/.test(text) ? ' xml:space="preserve"' : '';
     return `<c ${attrs.join(' ')}><is><t${preserveSpace}>${xmlText(text)}</t></is></c>`;
@@ -1075,6 +1079,61 @@ function serializeThreadedComments(comments: ExcelThreadedCommentModel[]): strin
     .join('')}</ThreadedComments>`;
 }
 
+interface DrawingPositionPatch {
+  part: Part;
+  element: Element;
+  anchor: ExcelDrawingAnchorModel;
+}
+
+/** Resolve existing anchors so position edits can preserve all other package parts. */
+export function collectDrawingPositionPatches(
+  pkg: Package,
+  before: ExcelWorkbookModel,
+  after: ExcelWorkbookModel,
+): DrawingPositionPatch[] | null {
+  if (before.sheets.length !== after.sheets.length) return null;
+  const patches: DrawingPositionPatch[] = [];
+  for (let sheetIndex = 0; sheetIndex < after.sheets.length; sheetIndex++) {
+    const previous = before.sheets[sheetIndex]!.drawings;
+    const current = after.sheets[sheetIndex]!.drawings;
+    if (previous.length !== current.length) return null;
+    for (let drawingIndex = 0; drawingIndex < current.length; drawingIndex++) {
+      const oldDrawing = previous[drawingIndex]!;
+      const drawing = current[drawingIndex]!;
+      if (JSON.stringify(oldDrawing) === JSON.stringify(drawing)) continue;
+      if (!drawing.path || drawing.path !== oldDrawing.path || drawing.relationshipId !== oldDrawing.relationshipId ||
+          drawing.anchors.length !== oldDrawing.anchors.length) return null;
+      const part = getPart(pkg, drawing.path);
+      if (!part?.xmlDom) return null;
+      const elements = drawingAnchorElements(part.xmlDom);
+      for (let anchorIndex = 0; anchorIndex < drawing.anchors.length; anchorIndex++) {
+        const oldAnchor = oldDrawing.anchors[anchorIndex]!;
+        const anchor = drawing.anchors[anchorIndex]!;
+        if (JSON.stringify(oldAnchor) === JSON.stringify(anchor)) continue;
+        const element = elements[anchorIndex];
+        if (!element || anchor.kind !== oldAnchor.kind ||
+            (anchor.object?.kind !== 'image' && anchor.object?.kind !== 'shape') ||
+            JSON.stringify(anchor.object) !== JSON.stringify(oldAnchor.object)) return null;
+        patches.push({ part, element, anchor });
+      }
+    }
+  }
+  return patches;
+}
+
+export function patchDrawingPositions(patches: readonly DrawingPositionPatch[]): void {
+  for (const { part, element, anchor } of patches) {
+    updateDrawingPosition(element, anchor);
+    markDirty(part);
+  }
+}
+
+function drawingAnchorElements(dom: Document): Element[] {
+  return ['twoCellAnchor', 'oneCellAnchor', 'absoluteAnchor'].flatMap(
+    (name) => Array.from(dom.getElementsByTagNameNS('*', name)),
+  );
+}
+
 function syncDrawingParts(pkg: Package, sheet: ExcelSheetModel): void {
   for (const drawing of sheet.drawings) {
     if (!drawing.path) continue;
@@ -1084,21 +1143,46 @@ function syncDrawingParts(pkg: Package, sheet: ExcelSheetModel): void {
       ensureContentTypeOverride(pkg, drawing.path, DRAWING_CONTENT_TYPE);
       continue;
     }
-    const anchorEls = [
-      ...Array.from(part.xmlDom.getElementsByTagNameNS('*', 'twoCellAnchor')),
-      ...Array.from(part.xmlDom.getElementsByTagNameNS('*', 'oneCellAnchor')),
-      ...Array.from(part.xmlDom.getElementsByTagNameNS('*', 'absoluteAnchor')),
-    ];
+    const anchorEls = drawingAnchorElements(part.xmlDom);
     for (let i = 0; i < drawing.anchors.length; i++) {
       const anchor = drawing.anchors[i];
       const anchorEl = anchorEls[i];
       if (!anchor || !anchorEl) continue;
-      updateMarker(anchorEl, 'from', anchor.from);
-      updateMarker(anchorEl, 'to', anchor.to);
+      updateDrawingPosition(anchorEl, anchor);
       updateDrawingObjectName(anchorEl, anchor.object?.name);
     }
     markDirty(part);
   }
+}
+
+function updateDrawingPosition(element: Element, anchor: ExcelDrawingAnchorModel): void {
+  updateMarker(element, 'from', anchor.from);
+  updateMarker(element, 'to', anchor.to);
+  if (anchor.kind === 'absolute') {
+    const pos = element.getElementsByTagNameNS(DRAWING_NS, 'pos')[0];
+    setDrawingCoordinates(pos, 'x', anchor.x, 'y', anchor.y);
+  }
+  if (anchor.kind !== 'twoCell') {
+    const extent = element.getElementsByTagNameNS(DRAWING_NS, 'ext')[0];
+    setDrawingCoordinates(extent, 'cx', anchor.width, 'cy', anchor.height);
+  }
+  if (!anchor.transform) return;
+  const transform = element.getElementsByTagNameNS(A_NS, 'xfrm')[0];
+  const offset = transform?.getElementsByTagNameNS(A_NS, 'off')[0];
+  const size = transform?.getElementsByTagNameNS(A_NS, 'ext')[0];
+  setDrawingCoordinates(offset, 'x', anchor.transform.x, 'y', anchor.transform.y);
+  setDrawingCoordinates(size, 'cx', anchor.transform.width, 'cy', anchor.transform.height);
+}
+
+function setDrawingCoordinates(
+  element: Element | undefined,
+  horizontalName: string,
+  horizontal: number | undefined,
+  verticalName: string,
+  vertical: number | undefined,
+): void {
+  if (horizontal !== undefined) element?.setAttribute(horizontalName, String(horizontal));
+  if (vertical !== undefined) element?.setAttribute(verticalName, String(vertical));
 }
 
 function serializeDrawing(drawing: ExcelDrawingModel): string {

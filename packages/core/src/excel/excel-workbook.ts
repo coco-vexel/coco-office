@@ -1,11 +1,18 @@
 import { createPackage, fromZip, toZip, type Package } from '../pack/index.js';
 import type { ExcelStylesModel, ExcelWorkbookModel } from './model.js';
 import { readWorkbookModel } from './xlsx-reader.js';
-import { createWorkbookPackageFromModel, syncWorkbookModelToPackage } from './xlsx-writer.js';
+import {
+  collectDrawingPositionPatches,
+  createWorkbookPackageFromModel,
+  patchDrawingPositions,
+  syncWorkbookModelToPackage,
+} from './xlsx-writer.js';
 import { collectContentOnlyCellPatches, patchWorkbookCellsInPackage } from './xlsx-cell-patcher.js';
 import { ExcelNamedItemCollection } from './names.js';
 import { ExcelWorksheetCollection } from './worksheet.js';
 import { ExcelMutationLog, type ExcelWorkbookMutation } from './mutations.js';
+import { cloneDrawingAnchor } from './objects.js';
+import { cloneExcelCell } from './rich-text.js';
 import { importExcelCellStyles, type ExcelCellStyleSnapshot } from './cell-style.js';
 import {
   addWorksheetLinesToPackage,
@@ -141,14 +148,17 @@ export class ExcelWorkbookCore {
       this.materializePackage();
       return toZip(this.pkg);
     }
-    const cellPatches = collectContentOnlyCellPatches(this.baselineModel, this.model);
+    let cellPatches = collectContentOnlyCellPatches(this.baselineModel, this.model);
+    const drawingPatches = cellPatches ? null : collectDrawingPositionPatches(this.pkg, this.baselineModel, this.model);
+    if (drawingPatches?.length) {
+      cellPatches = collectContentOnlyCellPatches(this.baselineModel, this.model, true);
+    }
     if (cellPatches) {
       patchWorkbookCellsInPackage(this.pkg, cellPatches);
-      const bytes = await toZip(this.pkg);
-      this.baselineModel = structuredCloneModel(this.model);
-      return bytes;
+      if (drawingPatches) patchDrawingPositions(drawingPatches);
+    } else {
+      syncWorkbookModelToPackage(this.pkg, this.model);
     }
-    syncWorkbookModelToPackage(this.pkg, this.model);
     const bytes = await toZip(this.pkg);
     this.baselineModel = structuredCloneModel(this.model);
     return bytes;
@@ -223,19 +233,14 @@ function structuredCloneModel(model: ExcelWorkbookModel): ExcelWorkbookModel {
       threadedComments: sheet.threadedComments.map((comment) => ({ ...comment })),
       drawings: sheet.drawings.map((drawing) => ({
         ...drawing,
-        anchors: drawing.anchors.map((anchor) => ({
-          ...anchor,
-          from: anchor.from ? { ...anchor.from } : undefined,
-          to: anchor.to ? { ...anchor.to } : undefined,
-          object: anchor.object ? { ...anchor.object } : undefined,
-        })),
+        anchors: drawing.anchors.map(cloneDrawingAnchor),
       })),
       charts: sheet.charts.map((chart) => ({
         ...chart,
         formulaRefs: [...chart.formulaRefs],
       })),
       images: sheet.images.map((image) => ({ ...image })),
-      cells: sheet.cells.map((cell) => ({ ...cell })),
+      cells: sheet.cells.map(cloneExcelCell),
     })),
   };
 }

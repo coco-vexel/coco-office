@@ -7,6 +7,7 @@ import type {
   ExcelColorModel,
   ExcelDefinedNameModel,
   ExcelMergedRangeModel,
+  ExcelRichTextRun,
   ExcelRowModel,
   ExcelSheetModel,
   ExcelSheetViewModel,
@@ -406,6 +407,7 @@ export class ExcelWorkbookHistory {
 
 export interface ExcelTransactionBuilder {
   setCellValue(sheetName: string, address: string, value: ExcelCellValue): Promise<void>;
+  setCellRichText(sheetName: string, address: string, runs: readonly ExcelRichTextRun[]): Promise<void>;
   setCellFormula(sheetName: string, address: string, formula: string | null): Promise<void>;
   setRangeValues(sheetName: string, address: string, values: ExcelCellValue[][]): Promise<void>;
   clearRange(sheetName: string, address: string): Promise<void>;
@@ -448,6 +450,12 @@ class ExcelTransactionGroupBuilder implements ExcelTransactionBuilder {
 
   async setCellValue(sheetName: string, address: string, value: ExcelCellValue): Promise<void> {
     await this.setRangeValues(sheetName, address, [[value]]);
+  }
+
+  async setCellRichText(sheetName: string, address: string, runs: readonly ExcelRichTextRun[]): Promise<void> {
+    await this.recordRangeCells(sheetName, address, 'Set cell rich text', async () => {
+      await this.workbook.worksheets.getItem(sheetName).getRange(address).setRichText(runs);
+    });
   }
 
   async setCellFormula(sheetName: string, address: string, formula: string | null): Promise<void> {
@@ -1054,6 +1062,7 @@ async function applyRangeCellsPatch(workbook: ExcelWorkbook, patch: ExcelRangeCe
     for (const cell of args.cells) {
       const target = sheet.getCell(cell.address);
       if (cell.formula !== undefined) target.setFormula(cell.formula);
+      else if (cell.richText) target.toRange().setRichText(cell.richText);
       else target.setValue(cell.value);
       if (cell.styleId !== undefined) target.setStyleId(cell.styleId);
     }

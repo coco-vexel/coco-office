@@ -3,8 +3,10 @@ import { getRenderCell } from './render-model.js';
 import {
   resolveSpreadsheetCellStyle,
   resolveSpreadsheetRangeBorder,
+  resolveSpreadsheetRunStyle,
   type SpreadsheetResolvedCellStyle,
 } from './style-resolver.js';
+import { layoutRichText } from './rich-text-layout.js';
 import type { SpreadsheetLayout } from './layout.js';
 import type { SpreadsheetViewportManager } from './viewport.js';
 import type { SpreadsheetRange, SpreadsheetRect, SpreadsheetViewport } from './types.js';
@@ -213,46 +215,23 @@ export class SpreadsheetCanvasRenderer {
     for (const viewport of viewportManager.viewports) {
       if (!isCellViewport(viewport)) continue;
       withClip(ctx, viewport.screenRect, () => {
-        for (let row = viewport.rows.start; row <= viewport.rows.end; row++) {
-          for (let column = viewport.columns.start; column <= viewport.columns.end; column++) {
-            const address = formatCellAddress(row, column);
-            const mergeMaster = layout.model.mergeFollowerByAddress.get(address);
-            if (mergeMaster) continue;
-            this.drawCell(ctx, layout, viewportManager, viewport, row, column, {
-              drawBorder: false,
-              reserveTrailingSpace: this.headerFiltersEnabled && row === 1,
-            });
-            if (
-              this.headerFiltersEnabled &&
-              row === 1 &&
-              (this.headerFilterColumns === null || this.headerFilterColumns.has(column))
-            ) {
-              const logical = layout.getCellLogicalRect(row, column);
-              const rect = {
-                x: viewport.screenRect.x + logical.x - viewport.originX,
-                y: viewport.screenRect.y + logical.y - viewport.originY,
-                width: logical.width,
-                height: logical.height,
-              };
-              drawFilterIcon(
-                ctx,
-                rect,
-                this.scaleX,
-                this.scaleY,
-                this.activeHeaderFilterColumns.has(column),
-              );
-            }
+        const cells = [...visibleCellAnchors(layout, viewport)];
+        for (const { row, column } of cells) {
+          this.drawCell(ctx, layout, viewportManager, viewport, row, column, {
+            drawBorder: false,
+            reserveTrailingSpace: this.headerFiltersEnabled && row === 1,
+          });
+          if (
+            this.headerFiltersEnabled &&
+            row === 1 &&
+            (this.headerFilterColumns === null || this.headerFilterColumns.has(column))
+          ) {
+            const rect = viewportManager.cellScreenRect(row, column, viewport);
+            drawFilterIcon(ctx, rect, this.scaleX, this.scaleY, this.activeHeaderFilterColumns.has(column));
           }
         }
-        for (let row = viewport.rows.start; row <= viewport.rows.end; row++) {
-          for (let column = viewport.columns.start; column <= viewport.columns.end; column++) {
-            const address = formatCellAddress(row, column);
-            const mergeMaster = layout.model.mergeFollowerByAddress.get(address);
-            if (mergeMaster) continue;
-            this.drawCell(ctx, layout, viewportManager, viewport, row, column, {
-              drawContent: false,
-            });
-          }
+        for (const { row, column } of cells) {
+          this.drawCell(ctx, layout, viewportManager, viewport, row, column, { drawContent: false });
         }
       });
     }
@@ -268,7 +247,7 @@ export class SpreadsheetCanvasRenderer {
     options: { drawBorder?: boolean; drawContent?: boolean; reserveTrailingSpace?: boolean } = {},
   ): void {
     const cell = getRenderCell(layout.model, row, column);
-    const merge = cell ? layout.model.mergeMasterByAddress.get(cell.address) : undefined;
+    const merge = layout.model.mergeMasterByAddress.get(cell?.address ?? formatCellAddress(row, column));
     const rect = merge
       ? logicalRectToScreen(layout.getRangeLogicalRect(merge.range), viewport)
       : viewportManager.cellScreenRect(row, column, viewport);
@@ -277,9 +256,11 @@ export class SpreadsheetCanvasRenderer {
     if (options.drawContent !== false) {
       ctx.fillStyle = style.fillColor;
       ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-      ctx.strokeStyle = '#E5E7EB';
-      ctx.lineWidth = 1 / this.scaleX;
-      strokeCrispRect(ctx, rect, this.scaleX, this.scaleY);
+      if (!style.hasFill && layout.model.source.sheetViews[0]?.showGridLines !== false) {
+        ctx.strokeStyle = '#E5E7EB';
+        ctx.lineWidth = 1 / this.scaleX;
+        strokeCrispRect(ctx, rect, this.scaleX, this.scaleY);
+      }
     }
     if (options.drawBorder !== false) drawCellBorder(ctx, rect, border, this.scaleX, this.scaleY);
     if (options.drawContent === false || !cell?.displayText) return;
@@ -304,6 +285,35 @@ export class SpreadsheetCanvasRenderer {
           ? contentRect.x + contentRect.width / 2
           : contentRect.x + padding;
     withClip(ctx, contentRect, () => {
+      const runs = cell.kind === 'string' ? cell.source.richText : undefined;
+      if (runs?.length && runs.map((run) => run.text).join('') === cell.displayText) {
+        ctx.textBaseline = 'alphabetic';
+        ctx.textAlign = 'left';
+        const lines = layoutRichText(ctx, runs.map((run) => ({
+          text: run.text,
+          style: resolveSpreadsheetRunStyle(layout.model.styles, cell.styleId, run),
+        })), Math.max(1, contentRect.width - padding * 2), style.wrapText || cell.displayText.includes('\n'));
+        const blockHeight = lines.reduce((height, line) => height + line.height, 0);
+        const alignedY = textBlockStartY(contentRect, style, padding, blockHeight, 0);
+        let lineTop = style.verticalAlign === 'middle' ? Math.max(contentRect.y + padding, alignedY) : alignedY;
+        for (const line of lines) {
+          let x = style.horizontalAlign === 'right' ? textX - line.width
+            : style.horizontalAlign === 'center' ? textX - line.width / 2 : textX;
+          const y = lineTop + line.baseline;
+          for (const fragment of line.fragments) {
+            ctx.font = fragment.style.font;
+            ctx.fillStyle = fragment.style.fontColor;
+            ctx.fillText(fragment.text, x, y);
+            if (fragment.style.underline) {
+              drawTextUnderline(ctx, fragment.text, x, y,
+                { ...fragment.style, horizontalAlign: 'left' }, this.scaleX, this.scaleY);
+            }
+            x += fragment.width;
+          }
+          lineTop += line.height;
+        }
+        return;
+      }
       const lines = style.wrapText || cell.displayText.includes('\n')
         ? wrapCanvasText(ctx, cell.displayText, Math.max(1, contentRect.width - padding * 2))
         : [cell.displayText];
@@ -356,6 +366,27 @@ export class SpreadsheetCanvasRenderer {
           }
         }
       });
+    }
+  }
+}
+
+function* visibleCellAnchors(
+  layout: SpreadsheetLayout,
+  viewport: SpreadsheetViewport,
+): Iterable<{ row: number; column: number }> {
+  const merged = new Set<string>();
+  const { mergeFollowerByAddress, mergeMasterByAddress } = layout.model;
+  for (let row = viewport.rows.start; row <= viewport.rows.end; row++) {
+    for (let column = viewport.columns.start; column <= viewport.columns.end; column++) {
+      const address = formatCellAddress(row, column);
+      const master = mergeFollowerByAddress.get(address) ?? address;
+      const merge = mergeMasterByAddress.get(master);
+      if (!merge) {
+        yield { row, column };
+      } else if (!merged.has(master)) {
+        merged.add(master);
+        yield { row: merge.range.startRow, column: merge.range.startColumn };
+      }
     }
   }
 }
@@ -539,7 +570,7 @@ function drawTextUnderline(
   text: string,
   textX: number,
   textY: number,
-  style: SpreadsheetResolvedCellStyle,
+  style: Pick<SpreadsheetResolvedCellStyle, 'fontSize' | 'fontColor' | 'horizontalAlign'>,
   scaleX: number,
   scaleY: number,
 ): void {

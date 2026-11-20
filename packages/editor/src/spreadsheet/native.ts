@@ -1,4 +1,5 @@
 import {
+  ExcelWorkbook,
   formatCellAddress,
   formatRangeAddress,
   type ExcelCellValue,
@@ -6,7 +7,18 @@ import {
   type ExcelChartModel,
   type ExcelDrawingAnchorModel,
   type ExcelDrawingModel,
+  type ExcelRichTextRun,
 } from '@coco-vexel/coco-office/excel';
+import { fromZip } from '@coco-vexel/coco-office/pack';
+import { SpreadsheetDrawingPreviews } from './drawing-preview.js';
+import {
+  DRAWING_RESIZE_HANDLES,
+  dragDrawingRect,
+  drawingHandleRect,
+  drawingMarkerAt,
+  drawingPositionForRect,
+  type DrawingResizeHandle,
+} from './drawing-geometry.js';
 import { freezeStateFromSheet, SpreadsheetViewportManager } from './viewport.js';
 import { SpreadsheetCanvasRenderer } from './canvas-renderer.js';
 import { SpreadsheetEditorRuntime, type SpreadsheetUserTransactionOptions } from './runtime.js';
@@ -25,7 +37,7 @@ import {
 import { buildSpreadsheetClipboardPayload, clipboardHtml, clipboardToken, parseTsv, readSpreadsheetClipboardPayload, serializeSpreadsheetClipboardPayload, SPREADSHEET_CLIPBOARD_MIME, type SpreadsheetClipboardPayload } from './clipboard.js';
 import { navigateSpreadsheetSelection, selectSpreadsheetRegion } from './keyboard.js';
 import { getRenderCell } from './render-model.js';
-import { resolveSpreadsheetCellStyle, type SpreadsheetResolvedCellStyle } from './style-resolver.js';
+import { resolveSpreadsheetCellStyle, resolveSpreadsheetRunStyle, type SpreadsheetResolvedCellStyle } from './style-resolver.js';
 import { spreadsheetFilterValues, type SpreadsheetColumnFilter } from './filter.js';
 import { supportsSpreadsheetAutoFill } from './auto-fill.js';
 import {
@@ -42,6 +54,7 @@ import {
 } from './scrollbar.js';
 import type {
   SpreadsheetFreezeState,
+  SpreadsheetPoint,
   SpreadsheetRange,
   SpreadsheetRect,
   SpreadsheetSheetRenderModel,
@@ -50,6 +63,33 @@ import type {
 } from './types.js';
 import { EditorReadOnlyError } from '../read-only.js';
 import { ActionConfirmPopover } from '../action-confirm-popover.js';
+
+interface DrawingReference {
+  sheetId: string;
+  drawingIndex: number;
+  anchorIndex: number;
+}
+
+interface DrawingTarget {
+  reference: DrawingReference;
+  anchor: ExcelDrawingAnchorModel;
+  rect: SpreadsheetRect;
+}
+
+interface DrawingHit {
+  target: DrawingTarget;
+  screenRect: SpreadsheetRect;
+  handle?: DrawingResizeHandle;
+}
+
+interface DrawingDrag {
+  target: DrawingTarget;
+  pointerId: number;
+  startScreen: SpreadsheetPoint;
+  startPoint: SpreadsheetPoint;
+  previewRect: SpreadsheetRect;
+  handle?: DrawingResizeHandle;
+}
 
 export interface SpreadsheetEditorChangeEvent {
   kind: 'workbookChange';
@@ -172,12 +212,20 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   private readonly headerCanvas = document.createElement('canvas');
   private readonly overlayCanvas = document.createElement('canvas');
   private readonly unsupportedObjectLayer = document.createElement('div');
+  private drawingPreviews: SpreadsheetDrawingPreviews | null = null;
+  private drawingHits: DrawingHit[] = [];
+  private selectedDrawing: DrawingReference | null = null;
+  private drawingDrag: DrawingDrag | null = null;
+  private suppressGridClick = false;
+  private workbookLoadId = 0;
   private readonly sheetTabs = document.createElement('div');
   private readonly horizontalScrollbar = document.createElement('div');
   private readonly verticalScrollbar = document.createElement('div');
   private readonly horizontalThumb = document.createElement('div');
   private readonly verticalThumb = document.createElement('div');
   private readonly cellEditorElement = document.createElement('textarea');
+  private readonly richEditorFrame = document.createElement('div');
+  private readonly richEditorInput = document.createElement('div');
   private readonly resizeGuide = document.createElement('div');
   private readonly contextMenu = document.createElement('div');
   private readonly filterMenu = document.createElement('div');
@@ -263,6 +311,24 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       overflowWrap: 'break-word',
     });
     this.renderRoot.appendChild(this.cellEditorElement);
+    this.richEditorFrame.className = 'coco-spreadsheet-rich-editor';
+    Object.assign(this.richEditorFrame.style, {
+      position: 'absolute', zIndex: '20', display: 'none', flexDirection: 'column',
+      boxSizing: 'border-box', border: '2px solid #2563eb', padding: '2px 4px',
+      overflow: 'auto',
+    });
+    this.richEditorInput.className = 'coco-spreadsheet-rich-editor-input';
+    this.richEditorInput.setAttribute('contenteditable', 'true');
+    this.richEditorInput.setAttribute('role', 'textbox');
+    this.richEditorInput.setAttribute('aria-label', '编辑单元格');
+    this.richEditorInput.setAttribute('aria-multiline', 'true');
+    this.richEditorInput.setAttribute('tabindex', '-1');
+    Object.assign(this.richEditorInput.style, {
+      outline: 'none', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', flexShrink: '0',
+      minHeight: '1em',
+    });
+    this.richEditorFrame.appendChild(this.richEditorInput);
+    this.renderRoot.appendChild(this.richEditorFrame);
     this.resizeGuide.className = 'coco-spreadsheet-resize-guide';
     Object.assign(this.resizeGuide.style, {
       position: 'absolute',
@@ -309,7 +375,14 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.sheetDeleteConfirmation = new ActionConfirmPopover(host, this.renderRoot);
     this.cellEditor = new SpreadsheetCellEditor({
       textarea: this.cellEditorElement,
-      onCommit: async (value) => this.commitCellEdit(value),
+      richFrame: this.richEditorFrame,
+      richInput: this.richEditorInput,
+      onCommit: async (value, runs) => this.commitCellEdit(value, runs),
+      onInput: (value) => {
+        if (!this.editingCell) return;
+        this.formulaReferenceRanges = formulaReferenceRangesFromText(value);
+        this.render();
+      },
       onNavigate: (key, reverse) => { this.navigateGrid(key, reverse); this.host.focus({ preventScroll: true }); },
       onError: (error) => this.reportError(error),
       onCancel: () => {
@@ -319,11 +392,6 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
         this.formulaReferenceRanges = [];
         this.render();
       },
-    });
-    this.cellEditorElement.addEventListener('input', () => {
-      if (!this.editingCell) return;
-      this.formulaReferenceRanges = formulaReferenceRangesFromText(this.cellEditorElement.value);
-      this.render();
     });
     this.configureScrollbar(this.horizontalScrollbar, this.horizontalThumb, true);
     this.configureScrollbar(this.verticalScrollbar, this.verticalThumb, false);
@@ -344,6 +412,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     host.addEventListener('pointerdown', this.handlePointerDown);
     host.addEventListener('pointermove', this.handlePointerMove);
     host.addEventListener('pointerup', this.handlePointerUp);
+    host.addEventListener('pointercancel', this.handlePointerCancel);
     host.addEventListener('pointerleave', this.handlePointerLeave);
     host.addEventListener('keydown', this.handleKeyDown);
     host.addEventListener('keyup', this.handleKeyUp);
@@ -373,11 +442,12 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.resizeDrag = null;
     this.autoFillDrag = null;
     this.chartDrag = null;
+    this.clearDrawingSelection();
     this.selecting = false;
     this.hideResizeGuide();
     this.hideContextMenu();
     this.hideFilterMenu();
-    this.runtime().setReadOnly(readOnly);
+    this.runtimeValue?.setReadOnly(readOnly);
     this.readOnlyValue = readOnly;
     this.host.setAttribute('aria-readonly', String(readOnly));
     this.renderTabs();
@@ -432,6 +502,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   setActiveSheet(name: string): Promise<void> {
     return this.queueGridMutation(async () => {
       await this.runtime().setActiveSheet(name);
+      this.clearDrawingSelection();
       this.copiedRange = null;
       this.scroll = { x: 0, y: 0 };
       this.selectionState = expandSelectionForMergedRanges(createSelection(1, 1), this.runtime().activeSheet());
@@ -590,27 +661,44 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
 
   async loadWorkbook(bytes: Uint8Array | ArrayBuffer): Promise<void> {
     this.assertAlive();
+    const loadId = ++this.workbookLoadId;
     await this.flushEdits();
+    if (this.disposed || loadId !== this.workbookLoadId) return;
     const previous = this.runtimeValue;
     this.runtimeValue = null;
+    this.clearDrawingSelection();
+    this.drawingPreviews?.dispose();
+    this.drawingPreviews = null;
     this.copiedRange = null;
     this.clipboardPayload = null;
     this.clipboardCut = false;
     this.clipboardActive = false;
     this.scroll = { x: 0, y: 0 };
     if (previous) await previous.dispose();
-    this.runtimeValue = await SpreadsheetEditorRuntime.fromZip(bytes, {
+    const pkg = await fromZip(bytes);
+    if (this.disposed || loadId !== this.workbookLoadId) return;
+    const workbook = ExcelWorkbook.fromPackage(pkg, {
       workbookId: this.options.workbookId,
       mode: 'inline',
-      readOnly: this.readOnlyValue,
     });
+    const runtime = await SpreadsheetEditorRuntime.fromWorkbook(workbook, { readOnly: this.readOnlyValue });
+    if (this.disposed || loadId !== this.workbookLoadId) {
+      await runtime.dispose();
+      return;
+    }
+    this.runtimeValue = runtime;
+    this.drawingPreviews = new SpreadsheetDrawingPreviews(pkg);
     // Canvas does not automatically redraw when a web/local font finishes loading.
     const model = this.runtimeValue.activeSheet();
     this.selectionState = expandSelectionForMergedRanges(createSelection(1, 1), model);
-    await loadOfficeFonts(model.styles.cellFormats.map((_, index) =>
-      resolveSpreadsheetCellStyle(model.styles, index).font,
-    ));
-    if (this.disposed) return;
+    const fonts = new Set(model.styles.cellFormats.map((_, index) => resolveSpreadsheetCellStyle(model.styles, index).font));
+    for (const sheet of runtime.model().sheets) {
+      for (const cell of sheet.cells) {
+        for (const run of cell.richText ?? []) fonts.add(resolveSpreadsheetRunStyle(model.styles, cell.styleId, run).font);
+      }
+    }
+    await loadOfficeFonts(fonts);
+    if (this.disposed || loadId !== this.workbookLoadId) return;
     this.host.setAttribute('aria-readonly', String(this.isReadOnly()));
     this.renderTabs();
     this.render();
@@ -689,6 +777,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.host.removeEventListener('pointerdown', this.handlePointerDown);
     this.host.removeEventListener('pointermove', this.handlePointerMove);
     this.host.removeEventListener('pointerup', this.handlePointerUp);
+    this.host.removeEventListener('pointercancel', this.handlePointerCancel);
     this.host.removeEventListener('pointerleave', this.handlePointerLeave);
     this.host.removeEventListener('keydown', this.handleKeyDown);
     this.host.removeEventListener('keyup', this.handleKeyUp);
@@ -700,6 +789,9 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.sheetDeleteConfirmation.destroy();
     this.contextMenu.remove();
     this.filterMenu.remove();
+    this.clearDrawingSelection();
+    this.drawingPreviews?.dispose();
+    this.drawingPreviews = null;
     this.unsupportedObjectLayer.remove();
     this.host.replaceChildren();
     const runtime = this.runtimeValue;
@@ -767,17 +859,22 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     viewport: SpreadsheetViewportManager,
   ): void {
     this.unsupportedObjectLayer.replaceChildren();
+    this.drawingHits = [];
     const sheet = this.runtimeValue?.activeSheet().source;
     if (!sheet) return;
+    if (this.selectedDrawing && this.selectedDrawing.sheetId !== sheet.id) this.clearDrawingSelection();
 
-    for (const drawing of sheet.drawings) {
-      for (const anchor of drawing.anchors) {
+    for (const [drawingIndex, drawing] of sheet.drawings.entries()) {
+      for (const [anchorIndex, anchor] of drawing.anchors.entries()) {
         const guide = copybookGuideAppearance(anchor);
-        if (!guide) continue;
+        if (!guide) {
+          this.renderDrawingPreview(anchor, layout, viewport, { sheetId: sheet.id, drawingIndex, anchorIndex });
+          continue;
+        }
         const logicalRect = chartLogicalRect(layout, anchor);
         if (!logicalRect) continue;
 
-        for (const fragment of chartScreenFragments(logicalRect, viewport)) {
+        for (const fragment of drawingScreenFragments(logicalRect, viewport)) {
           const line = document.createElement('div');
           line.setAttribute('aria-hidden', 'true');
           Object.assign(line.style, {
@@ -798,6 +895,12 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       }
     }
 
+    if (sheet.path && this.drawingPreviews) {
+      for (const anchor of this.drawingPreviews.embeddedOnSheet(sheet.path)) {
+        this.renderDrawingPreview(anchor, layout, viewport);
+      }
+    }
+
     for (let chartIndex = 0; chartIndex < sheet.charts.length; chartIndex += 1) {
       const chart = sheet.charts[chartIndex];
       if (!chart) continue;
@@ -807,7 +910,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
         : chartLogicalRect(layout, anchor);
       if (!logicalRect) continue;
 
-      for (const fragment of chartScreenFragments(logicalRect, viewport)) {
+      for (const fragment of drawingScreenFragments(logicalRect, viewport)) {
         const notice = document.createElement('div');
         notice.className = 'coco-spreadsheet-unsupported-chart';
         Object.assign(notice.style, {
@@ -844,25 +947,131 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
         this.unsupportedObjectLayer.appendChild(notice);
       }
     }
+    const selected = this.drawingHits.find(({ target }) => sameDrawing(target.reference, this.selectedDrawing));
+    if (selected) this.renderDrawingSelection(selected.target, viewport);
+  }
+
+  private renderDrawingPreview(
+    anchor: ExcelDrawingAnchorModel,
+    layout: SpreadsheetLayout,
+    viewport: SpreadsheetViewportManager,
+    reference?: DrawingReference,
+  ): void {
+    if (!this.drawingPreviews || !anchor.object) return;
+    const drag = this.drawingDrag;
+    const rect = reference && drag && sameDrawing(reference, drag.target.reference)
+      ? drag.previewRect : drawingPreviewRect(layout, anchor);
+    if (!rect) return;
+    const target = reference && !this.isReadOnly() ? { reference, anchor, rect } : null;
+    for (const fragment of drawingScreenFragments(rect, viewport)) {
+      const content = this.drawingPreviews.render(anchor.object, rect, !reference);
+      if (!content) return;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'coco-spreadsheet-drawing-preview';
+      Object.assign(wrapper.style, overlayRectStyle(fragment), { overflow: 'hidden' });
+      Object.assign(content.style, {
+        position: 'absolute', maxWidth: 'none',
+        left: `${-fragment.clipLeft}px`, top: `${-fragment.clipTop}px`,
+        width: `${rect.width}px`, height: `${rect.height}px`,
+      });
+      wrapper.appendChild(content);
+      this.unsupportedObjectLayer.appendChild(wrapper);
+      if (target) this.drawingHits.push({ target, screenRect: fragment });
+    }
+  }
+
+  private renderDrawingSelection(target: DrawingTarget, viewport: SpreadsheetViewportManager): void {
+    const { rect } = target;
+    for (const fragment of drawingScreenFragments(rect, viewport)) {
+      const outline = document.createElement('div');
+      outline.className = 'coco-spreadsheet-drawing-selection';
+      Object.assign(outline.style, overlayRectStyle(fragment), {
+        boxSizing: 'border-box',
+        border: '1px solid #2563eb',
+        borderLeftWidth: fragment.clipLeft > 0 ? '0' : '1px',
+        borderTopWidth: fragment.clipTop > 0 ? '0' : '1px',
+        borderRightWidth: fragment.clipLeft + fragment.width < rect.width ? '0' : '1px',
+        borderBottomWidth: fragment.clipTop + fragment.height < rect.height ? '0' : '1px',
+      });
+      this.unsupportedObjectLayer.appendChild(outline);
+    }
+    for (const handle of DRAWING_RESIZE_HANDLES) {
+      for (const fragment of drawingScreenFragments(drawingHandleRect(rect, handle), viewport)) {
+        const node = document.createElement('div');
+        node.className = 'coco-spreadsheet-drawing-resize-handle';
+        node.dataset.handle = handle;
+        Object.assign(node.style, overlayRectStyle(fragment), {
+          boxSizing: 'border-box', border: '1px solid #2563eb', background: '#fff',
+        });
+        this.unsupportedObjectLayer.appendChild(node);
+        this.drawingHits.push({ target, screenRect: fragment, handle });
+      }
+    }
+  }
+
+  private drawingAtPoint(point: SpreadsheetPoint): DrawingHit | undefined {
+    for (let index = this.drawingHits.length - 1; index >= 0; index--) {
+      const hit = this.drawingHits[index]!;
+      if (containsPoint(hit.screenRect, point)) return hit;
+    }
+    return undefined;
+  }
+
+  private clearDrawingSelection(): void {
+    this.selectedDrawing = null;
+    this.cancelDrawingDrag();
+  }
+
+  private cancelDrawingDrag(): void {
+    const drag = this.drawingDrag;
+    if (!drag) return;
+    this.drawingDrag = null;
+    if (this.host.hasPointerCapture(drag.pointerId)) this.host.releasePointerCapture(drag.pointerId);
+    this.host.style.cursor = '';
+  }
+
+  private drawingDragRect(drag: DrawingDrag, point: SpreadsheetPoint): SpreadsheetRect {
+    const layout = this.layout!;
+    const logical = pointOnWorksheet(this.viewport!, point);
+    const delta = logical
+      ? { x: logical.x - drag.startPoint.x, y: logical.y - drag.startPoint.y }
+      : { x: point.x - drag.startScreen.x, y: point.y - drag.startScreen.y };
+    return dragDrawingRect(drag.target.rect, delta, { width: layout.totalWidth(), height: layout.totalHeight() }, drag.handle);
   }
 
   private readonly handleClick = (event: MouseEvent): void => {
+    if (this.suppressGridClick) {
+      this.suppressGridClick = false;
+      event.preventDefault();
+      return;
+    }
     if (this.eventPathContains(event, this.contextMenu) || this.eventPathContains(event, this.filterMenu)) return;
     if (this.filterMenu.style.display === 'block') this.hideFilterMenu();
     if (this.editingCell) {
-      if (this.eventPathContains(event, this.cellEditorElement)) return;
+      if (this.cellEditor.contains(event)) return;
       void this.cellEditor.commit().catch((error) => this.reportError(error));
     }
     if (!this.viewport || !this.layout) return;
-    const chartHit = this.chartAtPoint(this.eventPoint(event));
+    const point = this.eventPoint(event);
+    const drawingHit = this.drawingAtPoint(point);
+    const chartHit = drawingHit?.handle ? null : this.chartAtPoint(point);
     if (chartHit) {
+      this.clearDrawingSelection();
       this.selectedChartIndex = chartHit.chartIndex;
       this.render();
       event.preventDefault();
       return;
     }
     this.selectedChartIndex = null;
-    const hit = this.viewport.hitTest(this.eventPoint(event));
+    if (drawingHit) {
+      this.selectedDrawing = drawingHit.target.reference;
+      this.host.focus({ preventScroll: true });
+      this.render();
+      event.preventDefault();
+      return;
+    }
+    this.clearDrawingSelection();
+    const hit = this.viewport.hitTest(point);
     if (hit.kind !== 'cell' && hit.kind !== 'rowHeader' && hit.kind !== 'columnHeader') return;
     if (hit.kind === 'cell' && hit.row === 1 && this.isFilterIconHit(hit.column, event)) {
       if (this.isReadOnly()) return;
@@ -906,27 +1115,33 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   };
 
   private readonly handleDoubleClick = (event: MouseEvent): void => {
-    if (!this.viewport || !this.layout) return;
-    const hit = this.viewport.hitTest(this.eventPoint(event));
+    if (!this.viewport || !this.layout || this.cellEditor.contains(event)) return;
+    const point = this.eventPoint(event);
+    if (this.drawingAtPoint(point)) return;
+    const hit = this.viewport.hitTest(point);
     if (hit.kind !== 'cell') return;
     this.selectionState = expandSelectionForMergedRanges(createSelection(hit.row, hit.column), this.runtime().activeSheet());
     if (this.isReadOnly()) {
       this.render();
       return;
     }
-    this.openCellEditor();
+    void this.openCellEditor().catch((error) => this.reportError(error));
     event.preventDefault();
   };
 
   private readonly handlePointerDown = (event: PointerEvent): void => {
+    if (this.drawingDrag) return;
+    this.suppressGridClick = false;
     if (this.editingCell) {
-      if (this.eventPathContains(event, this.cellEditorElement)) return;
+      if (this.cellEditor.contains(event)) return;
       void this.cellEditor.commit().catch((error) => this.reportError(error));
     }
     if (event.button !== 0 || !this.viewport || !this.layout) return;
     const point = this.eventPoint(event);
-    const chartHit = this.chartAtPoint(point);
+    const drawingHit = this.drawingAtPoint(point);
+    const chartHit = drawingHit?.handle ? null : this.chartAtPoint(point);
     if (chartHit) {
+      this.clearDrawingSelection();
       this.selectedChartIndex = chartHit.chartIndex;
       if (this.isReadOnly()) {
         this.render();
@@ -945,6 +1160,23 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       return;
     }
     this.selectedChartIndex = null;
+    if (drawingHit && !this.isReadOnly()) {
+      const { target, handle } = drawingHit;
+      this.selectedDrawing = target.reference;
+      this.drawingDrag = {
+        target, handle, pointerId: event.pointerId, startScreen: point,
+        startPoint: pointOnWorksheet(this.viewport, point) ?? point,
+        previewRect: target.rect,
+      };
+      this.suppressGridClick = true;
+      this.host.focus({ preventScroll: true });
+      this.host.setPointerCapture(event.pointerId);
+      this.host.style.cursor = handle ? `${handle}-resize` : 'grabbing';
+      this.render();
+      event.preventDefault();
+      return;
+    }
+    this.clearDrawingSelection();
     const resizeHandle = hitSpreadsheetResizeHandle(this.layout, this.viewport.viewports, point);
     if (resizeHandle && !this.isReadOnly()) {
       this.resizeDrag = startSpreadsheetResizeDrag(resizeHandle, event);
@@ -981,6 +1213,13 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
 
   private readonly handlePointerMove = (event: PointerEvent): void => {
     if (!this.viewport || !this.layout) return;
+    if (this.drawingDrag) {
+      if (this.drawingDrag.pointerId !== event.pointerId) return;
+      this.drawingDrag.previewRect = this.drawingDragRect(this.drawingDrag, this.eventPoint(event));
+      this.render();
+      event.preventDefault();
+      return;
+    }
     if (this.chartDrag) {
       const point = this.eventPoint(event);
       const deltaX = point.x - this.chartDrag.pointer.x;
@@ -996,10 +1235,12 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       return;
     }
     if (!this.resizeDrag && !this.autoFillDrag && !this.selecting && !this.editingCell) {
-      const resizeHandle = this.isReadOnly()
+      const point = this.eventPoint(event);
+      const drawing = this.drawingAtPoint(point);
+      const resizeHandle = this.isReadOnly() || drawing
         ? null
-        : hitSpreadsheetResizeHandle(this.layout, this.viewport.viewports, this.eventPoint(event));
-      this.host.style.cursor = resizeHandle
+        : hitSpreadsheetResizeHandle(this.layout, this.viewport.viewports, point);
+      this.host.style.cursor = drawing ? (drawing.handle ? `${drawing.handle}-resize` : 'move') : resizeHandle
         ? resizeHandle.kind === 'column' ? 'col-resize' : 'row-resize'
         : '';
     }
@@ -1019,6 +1260,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     const hit = this.viewport.hitTest(this.eventPoint(event));
     if (hit.kind === 'none' || hit.kind === 'corner') return;
     const model = this.runtime().activeSheet();
+    const previous = this.selectionState.range;
     if (hit.kind === 'cell') {
       this.selectionState = expandSelectionForMergedRanges(
         extendSelection(this.selectionState, hit.row, hit.column, {
@@ -1032,11 +1274,43 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     } else if (hit.kind === 'columnHeader' && this.selectionState.kind === 'column') {
       this.selectionState = extendSelection(this.selectionState, 1, hit.column, { columnCount: this.layout.columnCount, rowCount: this.layout.rowCount });
     }
+    const current = this.selectionState.range;
+    if (current.startRow !== previous.startRow || current.endRow !== previous.endRow ||
+        current.startColumn !== previous.startColumn || current.endColumn !== previous.endColumn) {
+      this.suppressGridClick = true;
+    }
     this.render();
     event.preventDefault();
   };
 
   private readonly handlePointerUp = (event: PointerEvent): void => {
+    if (this.drawingDrag) {
+      const drag = this.drawingDrag;
+      if (drag.pointerId !== event.pointerId) return;
+      const rect = this.drawingDragRect(drag, this.eventPoint(event));
+      this.cancelDrawingDrag();
+      const start = drag.target.rect;
+      if (this.layout && !this.isReadOnly() &&
+          (rect.x !== start.x || rect.y !== start.y || rect.width !== start.width || rect.height !== start.height)) {
+        const layout = this.layout;
+        const runtime = this.runtime();
+        const { sheetId, drawingIndex, anchorIndex } = drag.target.reference;
+        const position = drawingPositionForRect(layout, rect, start, drag.target.anchor);
+        void this.queueGridMutation(async () => {
+          if (this.disposed || this.isReadOnly() || this.runtimeValue !== runtime || runtime.activeSheet().source.id !== sheetId) return;
+          await runtime.setDrawingPosition(sheetId, drawingIndex, anchorIndex, position);
+          this.render();
+          await this.emitChange();
+        }).catch((error) => {
+          this.render();
+          this.reportError(error);
+        });
+      } else {
+        this.render();
+      }
+      event.preventDefault();
+      return;
+    }
     if (this.chartDrag) {
       const completed = this.chartDrag;
       this.chartDrag = null;
@@ -1092,8 +1366,16 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     this.host.style.cursor = '';
   };
 
+  private readonly handlePointerCancel = (event: PointerEvent): void => {
+    if (this.drawingDrag?.pointerId === event.pointerId) {
+      this.cancelDrawingDrag();
+      this.render();
+    }
+    this.selecting = false;
+  };
+
   private readonly handlePointerLeave = (): void => {
-    if (!this.resizeDrag && !this.autoFillDrag && !this.chartDrag) this.host.style.cursor = '';
+    if (!this.resizeDrag && !this.autoFillDrag && !this.chartDrag && !this.drawingDrag) this.host.style.cursor = '';
   };
 
   private chartAnchorAtIndex(chartIndex: number): ExcelDrawingAnchorModel | undefined {
@@ -1114,7 +1396,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       const anchor = findChartAnchor(sheet.drawings, chart);
       const logicalRect = chartLogicalRect(this.layout, anchor);
       if (!logicalRect) continue;
-      if (chartScreenFragments(logicalRect, this.viewport).some((fragment) => containsPoint(fragment, point))) {
+      if (drawingScreenFragments(logicalRect, this.viewport).some((fragment) => containsPoint(fragment, point))) {
         return { chartIndex, logicalRect };
       }
     }
@@ -1151,6 +1433,14 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || this.editingCell || this.isControlEvent(event)) return;
     const command = event.ctrlKey || event.metaKey;
     const key = event.key.toLowerCase();
+    if (this.selectedDrawing && !(command && (key === 'z' || key === 'y'))) {
+      if (key === 'escape') {
+        this.clearDrawingSelection();
+        this.render();
+      }
+      if (!command && key !== 'tab') event.preventDefault();
+      return;
+    }
     if (command && !event.altKey) {
       // Browser clipboard events carry the real clipboard and its user permission.
       if (key === 'c' || key === 'x' || key === 'v') {
@@ -1274,14 +1564,15 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   private isControlEvent(event: Event): boolean {
-    return [this.cellEditorElement, this.sheetTabs, this.contextMenu, this.filterMenu].some((node) => this.eventPathContains(event, node)) ||
+    return this.cellEditor.contains(event) ||
+      [this.sheetTabs, this.contextMenu, this.filterMenu].some((node) => this.eventPathContains(event, node)) ||
       event.composedPath().some((node) => node instanceof HTMLElement && (node.isContentEditable || node.matches('input, textarea, select, button, [role="textbox"]')));
   }
 
   private cancelCopyOutline(): void { this.copiedRange = null; this.clipboardCut = false; this.clipboardActive = false; }
 
   private readonly handleCopy = (event: ClipboardEvent): void => {
-    if (this.editingCell || this.isControlEvent(event) || !event.clipboardData) return;
+    if (this.selectedDrawing || this.editingCell || this.isControlEvent(event) || !event.clipboardData) return;
     const range = normalizeSelectionRange(this.selectionState.range);
     const payload = buildSpreadsheetClipboardPayload(this.runtime().activeSheet(), range, { sourceWorkbookId: this.runtime().workbook().workbookId });
     this.clipboardPayload = payload;
@@ -1296,14 +1587,14 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   };
 
   private readonly handleCut = (event: ClipboardEvent): void => {
-    if (this.editingCell || this.isControlEvent(event)) return;
+    if (this.selectedDrawing || this.editingCell || this.isControlEvent(event)) return;
     if (this.isReadOnly()) { event.preventDefault(); return; }
     this.handleCopy(event);
     if (event.defaultPrevented && this.clipboardPayload) this.clipboardCut = true;
   };
 
   private readonly handlePaste = (event: ClipboardEvent): void => {
-    if (this.editingCell || this.isControlEvent(event)) return;
+    if (this.selectedDrawing || this.editingCell || this.isControlEvent(event)) return;
     if (this.isReadOnly()) {
       event.preventDefault();
       return;
@@ -1345,8 +1636,11 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
 
   private readonly handleContextMenu = (event: MouseEvent): void => {
     if (!this.viewport || !this.layout) return;
-    const chartHit = this.chartAtPoint(this.eventPoint(event));
+    const point = this.eventPoint(event);
+    const drawingHit = this.drawingAtPoint(point);
+    const chartHit = drawingHit?.handle ? null : this.chartAtPoint(point);
     if (chartHit) {
+      this.clearDrawingSelection();
       this.selectedChartIndex = chartHit.chartIndex;
       this.hideContextMenu();
       this.hideFilterMenu();
@@ -1354,7 +1648,20 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
       event.preventDefault();
       return;
     }
-    const hit = this.viewport.hitTest(this.eventPoint(event));
+    if (drawingHit) {
+      this.selectedDrawing = drawingHit.target.reference;
+      this.selectedChartIndex = null;
+      this.hideContextMenu();
+      this.hideFilterMenu();
+      this.render();
+      event.preventDefault();
+      return;
+    }
+    if (this.selectedDrawing) {
+      this.clearDrawingSelection();
+      this.render();
+    }
+    const hit = this.viewport.hitTest(point);
     if (hit.kind === 'cell' && !this.selectionContainsCell(hit.row, hit.column)) {
       this.selectionState = expandSelectionForMergedRanges(createSelection(hit.row, hit.column), this.runtime().activeSheet());
       this.render();
@@ -1694,42 +2001,42 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     if (!this.layout || !this.viewport) return;
     this.cancelCopyOutline();
     const cell = this.selectionState.active;
-    const viewport = this.viewport.findViewport({
-      x: this.layout.rowHeaderWidth + 1,
-      y: this.layout.columnHeaderHeight + 1,
-    });
-    const renderCell = getRenderCell(this.runtime().activeSheet(), cell.row, cell.column);
-    const cellStyle = resolveSpreadsheetCellStyle(this.runtime().activeSheet().styles, renderCell?.styleId, renderCell);
+    const model = this.runtime().activeSheet();
+    const renderCell = getRenderCell(model, cell.row, cell.column);
+    const cellStyle = resolveSpreadsheetCellStyle(model.styles, renderCell?.styleId, renderCell);
+    const value = renderCell?.formula ? `=${renderCell.formula}` : renderCell?.displayText ?? '';
+    const richText = initialText === undefined && renderCell?.kind === 'string' ? renderCell.source.richText : undefined;
+    const runs = richText?.length && richText.map((run) => run.text).join('') === value
+      ? richText.map((run) => ({ ...run, style: resolveSpreadsheetRunStyle(model.styles, renderCell?.styleId, run) }))
+      : undefined;
+    const rect = this.cellEditorRect(cell, runs !== undefined);
+    if (!rect) return;
     Object.assign(this.cellEditorElement.style, {
       font: cellStyle.font,
       color: cellStyle.fontColor,
+      backgroundColor: cellStyle.fillColor,
       textDecoration: cellStyle.underline ? 'underline' : 'none',
       textAlign: cellStyle.horizontalAlign,
     });
-    const targetViewport = this.viewport.viewports.find((item) => item.kind === 'main') ?? viewport;
-    if (!targetViewport) return;
-    const editRange = normalizeSelectionRange(this.selectionState.range);
-    const startRect = this.viewport.cellScreenRect(editRange.startRow, editRange.startColumn, targetViewport);
-    const endRect = this.viewport.cellScreenRect(editRange.endRow, editRange.endColumn, targetViewport);
-    const rect = {
-      x: startRect.x,
-      y: startRect.y,
-      width: endRect.x + endRect.width - startRect.x,
-      height: endRect.y + endRect.height - startRect.y,
-    };
+    if (runs) {
+      this.richEditorFrame.style.backgroundColor = cellStyle.fillColor;
+      Object.assign(this.richEditorInput.style, {
+        font: cellStyle.font, color: cellStyle.fontColor, textAlign: cellStyle.horizontalAlign,
+        whiteSpace: cellStyle.wrapText || /[\r\n]/.test(value) ? 'pre-wrap' : 'pre',
+        marginTop: cellStyle.verticalAlign === 'top' ? '0' : 'auto',
+        marginBottom: cellStyle.verticalAlign === 'bottom' ? '0' : 'auto',
+      });
+    }
     this.editingCell = cell;
     this.editingCellStyle = cellStyle;
-    const value = renderCell?.formula ? `=${renderCell.formula}` : renderCell?.displayText ?? '';
     this.editingCellInitialValue = value;
     const enteredValue = initialText ?? value;
     this.formulaReferenceRanges = formulaReferenceRangesFromText(enteredValue);
-    this.cellEditor.open(rect, enteredValue);
-    this.cellEditorElement.setSelectionRange(enteredValue.length, enteredValue.length);
-    this.alignCellEditor(rect, cellStyle);
+    this.cellEditor.open(rect, enteredValue, runs);
     this.render();
   }
 
-  private async commitCellEdit(value: string): Promise<void> {
+  private async commitCellEdit(value: string, runs?: readonly ExcelRichTextRun[]): Promise<void> {
     const cell = this.editingCell;
     const initialValue = this.editingCellInitialValue;
     this.editingCell = null;
@@ -1743,7 +2050,8 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
     }
     this.assertWritable();
     const address = formatCellAddress(cell.row, cell.column);
-    if (value.startsWith('=')) await this.runtime().setCellFormula(address, value.slice(1));
+    if (runs?.length) await this.runtime().setCellRichText(address, runs);
+    else if (value.startsWith('=')) await this.runtime().setCellFormula(address, value.slice(1));
     else await this.runtime().setCellValue(address, coerceEditorValue(value));
     this.render();
     await this.emitChange();
@@ -1764,36 +2072,41 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
 
   private updateCellEditorPosition(): void {
     const cell = this.editingCell;
+    if (!cell) return;
+    const rich = this.cellEditor.isRich();
+    const rect = this.cellEditorRect(cell, rich);
+    this.cellEditor.place(rect);
+    if (!rich && rect && this.editingCellStyle) this.alignCellEditor(rect, this.editingCellStyle);
+  }
+
+  private cellEditorRect(cell: { row: number; column: number }, clip: boolean): SpreadsheetRect | null {
     const layout = this.layout;
     const viewportManager = this.viewport;
-    if (!cell || !layout || !viewportManager) return;
-    const targetViewport = viewportManager.viewports.find((viewport) =>
-      viewport.kind !== 'columnHeaderFrozen' &&
-      viewport.kind !== 'columnHeaderScrollable' &&
-      viewport.kind !== 'rowHeaderFrozen' &&
-      viewport.kind !== 'rowHeaderScrollable' &&
+    if (!layout || !viewportManager) return null;
+    const editRange = normalizeSelectionRange(this.selectionState.range);
+    const body = viewportManager.viewports.filter(isBodyViewport);
+    const target = body.find((viewport) =>
       cell.row >= viewport.rows.start && cell.row <= viewport.rows.end &&
       cell.column >= viewport.columns.start && cell.column <= viewport.columns.end,
-    );
-    if (!targetViewport) {
-      this.cellEditorElement.style.display = 'none';
-      return;
-    }
-    const editRange = normalizeSelectionRange(this.selectionState.range);
-    const startRect = viewportManager.cellScreenRect(editRange.startRow, editRange.startColumn, targetViewport);
-    const endRect = viewportManager.cellScreenRect(editRange.endRow, editRange.endColumn, targetViewport);
+    ) ?? body.find(({ rows, columns }) =>
+      rows.start <= editRange.endRow && rows.end >= editRange.startRow &&
+      columns.start <= editRange.endColumn && columns.end >= editRange.startColumn);
+    if (!target) return null;
+    const startRect = viewportManager.cellScreenRect(editRange.startRow, editRange.startColumn, target);
+    const endRect = viewportManager.cellScreenRect(editRange.endRow, editRange.endColumn, target);
     const rect = {
       x: startRect.x,
       y: startRect.y,
       width: endRect.x + endRect.width - startRect.x,
       height: endRect.y + endRect.height - startRect.y,
     };
-    this.cellEditorElement.style.left = `${rect.x}px`;
-    this.cellEditorElement.style.top = `${rect.y}px`;
-    this.cellEditorElement.style.width = `${Math.max(1, rect.width)}px`;
-    this.cellEditorElement.style.height = `${Math.max(1, rect.height)}px`;
-    this.cellEditorElement.style.display = 'block';
-    if (this.editingCellStyle) this.alignCellEditor(rect, this.editingCellStyle);
+    if (!clip) return rect;
+    const pane = target.screenRect;
+    const x = Math.max(rect.x, pane.x);
+    const y = Math.max(rect.y, pane.y);
+    const width = Math.min(rect.x + rect.width, pane.x + pane.width) - x;
+    const height = Math.min(rect.y + rect.height, pane.y + pane.height) - y;
+    return width > 0 && height > 0 ? { x, y, width, height } : null;
   }
 
   private alignCellEditor(rect: { height: number }, style: SpreadsheetResolvedCellStyle): void {
@@ -2030,7 +2343,7 @@ class NativeSpreadsheetEditor implements SpreadsheetEditor {
   }
 
   private readonly handleWheel = (event: WheelEvent): void => {
-    if (!this.runtimeValue) return;
+    if (!this.runtimeValue || this.cellEditor.contains(event)) return;
     event.preventDefault();
     const next = applyWheelDelta(this.scroll, event.deltaX, event.deltaY);
     this.setScroll(next.x, next.y);
@@ -2054,6 +2367,25 @@ function containsPoint(
   point: { x: number; y: number },
 ): boolean {
   return point.x >= rect.x && point.y >= rect.y && point.x <= rect.x + rect.width && point.y <= rect.y + rect.height;
+}
+
+function overlayRectStyle(rect: SpreadsheetRect): Partial<CSSStyleDeclaration> {
+  return {
+    position: 'absolute',
+    left: `${rect.x}px`, top: `${rect.y}px`,
+    width: `${rect.width}px`, height: `${rect.height}px`,
+  };
+}
+
+function sameDrawing(reference: DrawingReference, other: DrawingReference | null): boolean {
+  return other !== null && reference.sheetId === other.sheetId &&
+    reference.drawingIndex === other.drawingIndex && reference.anchorIndex === other.anchorIndex;
+}
+
+function pointOnWorksheet(viewport: SpreadsheetViewportManager, point: SpreadsheetPoint): SpreadsheetPoint | undefined {
+  const pane = viewport.findViewport(point);
+  if (!pane || !isBodyViewport(pane)) return undefined;
+  return { x: point.x - pane.screenRect.x + pane.originX, y: point.y - pane.screenRect.y + pane.originY };
 }
 
 function findChartAnchor(
@@ -2116,11 +2448,30 @@ function chartLogicalRect(
   };
 }
 
-function chartScreenFragments(
+function drawingPreviewRect(layout: SpreadsheetLayout, anchor: ExcelDrawingAnchorModel): SpreadsheetRect | null {
+  if (anchor.kind === 'twoCell') {
+    return anchor.from && anchor.to ? chartLogicalRect(layout, anchor) : null;
+  }
+  const width = layout.emuToCssPixels(anchor.width);
+  const height = layout.emuToCssPixels(anchor.height);
+  if (width <= 0 || height <= 0) return null;
+  if (anchor.kind === 'absolute') {
+    return { x: layout.emuToCssPixels(anchor.x), y: layout.emuToCssPixels(anchor.y), width, height };
+  }
+  if (!anchor.from) return null;
+  return {
+    x: layout.getColumnX(markerIndex(anchor.from.column)) + layout.emuToCssPixels(anchor.from.columnOffset),
+    y: layout.getRowY(markerIndex(anchor.from.row)) + layout.emuToCssPixels(anchor.from.rowOffset),
+    width,
+    height,
+  };
+}
+
+function drawingScreenFragments(
   logicalRect: SpreadsheetRect,
   viewport: SpreadsheetViewportManager,
-): SpreadsheetRect[] {
-  const fragments: SpreadsheetRect[] = [];
+): Array<SpreadsheetRect & { clipLeft: number; clipTop: number }> {
+  const fragments: Array<SpreadsheetRect & { clipLeft: number; clipTop: number }> = [];
   for (const item of viewport.viewports) {
     if (!isBodyViewport(item)) continue;
     const visibleLeft = item.originX;
@@ -2137,6 +2488,8 @@ function chartScreenFragments(
       y: item.screenRect.y + top - item.originY,
       width: right - left,
       height: bottom - top,
+      clipLeft: left - logicalRect.x,
+      clipTop: top - logicalRect.y,
     });
   }
   return fragments;
@@ -2150,18 +2503,8 @@ function chartAnchorForLogicalRect(
   from: { row: number; column: number; rowOffset?: number; columnOffset?: number };
   to?: { row: number; column: number; rowOffset?: number; columnOffset?: number };
 } {
-  const marker = (x: number, y: number) => {
-    const column = layout.columnAt(Math.max(0, x));
-    const row = layout.rowAt(Math.max(0, y));
-    return {
-      column: column - 1,
-      row: row - 1,
-      columnOffset: layout.cssPixelsToEmu(x - layout.getColumnX(column)),
-      rowOffset: layout.cssPixelsToEmu(y - layout.getRowY(row)),
-    };
-  };
-  const from = marker(rect.x, rect.y);
-  const to = original.to ? marker(rect.x + rect.width, rect.y + rect.height) : undefined;
+  const from = drawingMarkerAt(layout, rect.x, rect.y);
+  const to = original.to ? drawingMarkerAt(layout, rect.x + rect.width, rect.y + rect.height) : undefined;
   return { from, to };
 }
 

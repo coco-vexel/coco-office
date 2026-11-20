@@ -19,6 +19,7 @@ import type {
   ExcelConditionalFormatRuleModel,
   ExcelDataValidationModel,
   ExcelDrawingAnchorModel,
+  ExcelDrawingAnchorPosition,
   ExcelDrawingMarkerModel,
   ExcelDrawingObjectModel,
   ExcelDrawingModel,
@@ -27,6 +28,7 @@ import type {
   ExcelHyperlinkModel,
   ExcelImageModel,
   ExcelMergedRangeModel,
+  ExcelRichTextRun,
   ExcelRowModel,
   ExcelSheetModel,
   ExcelSheetViewModel,
@@ -625,6 +627,10 @@ export class ExcelRange {
 
   async setValues(values: ExcelCellValue[][]): Promise<void> {
     await this.run<void>(`range.setValues(args.values);`, { values });
+  }
+
+  async setRichText(runs: readonly ExcelRichTextRun[]): Promise<void> {
+    await this.run<void>(`range.setRichText(args.runs);`, { runs });
   }
 
   async setFormulas(formulas: (string | null)[][]): Promise<void> {
@@ -1847,14 +1853,18 @@ export class ExcelDrawingAnchor {
     return this.run<ExcelDrawingAnchorModel>(`return anchor.toModel();`);
   }
 
-  private run<T>(code: string): Promise<T> {
+  async setPosition(position: ExcelDrawingAnchorPosition): Promise<void> {
+    await this.run<void>(`anchor.setPosition(args.position);`, { position });
+  }
+
+  private run<T>(code: string, args?: Record<string, unknown>): Promise<T> {
     return this.workbook.executeCode<T>(
       `
       const sheet = workbook.worksheets.getItem(args.sheetNameOrId);
       const anchor = sheet.drawings.items()[args.drawingIndex].anchors.getItem(args.anchorIndex);
       ${code}
     `,
-      { sheetNameOrId: this.sheetNameOrId, drawingIndex: this.drawingIndex, anchorIndex: this.anchorIndex },
+      { ...args, sheetNameOrId: this.sheetNameOrId, drawingIndex: this.drawingIndex, anchorIndex: this.anchorIndex },
     );
   }
 }

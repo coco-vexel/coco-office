@@ -1,14 +1,18 @@
-import type { ExcelBorderModel, ExcelCellFormatModel, ExcelStylesModel } from '@coco-vexel/coco-office/excel';
+import type { ExcelBorderModel, ExcelCellFormatModel, ExcelFontModel, ExcelRichTextRun, ExcelStylesModel } from '@coco-vexel/coco-office/excel';
 import { getRenderCell } from './render-model.js';
 import { resolveOfficeFontFamily } from '../fonts.js';
 import type { SpreadsheetRange, SpreadsheetRenderCell, SpreadsheetSheetRenderModel } from './types.js';
 
-export interface SpreadsheetResolvedCellStyle {
+export interface SpreadsheetTextStyle {
   font: string;
   fontSize: number;
   underline: boolean;
   fontColor: string;
+}
+
+export interface SpreadsheetResolvedCellStyle extends SpreadsheetTextStyle {
   fillColor: string;
+  hasFill: boolean;
   wrapText: boolean;
   border: ExcelBorderModel;
   horizontalAlign: CanvasTextAlign;
@@ -22,19 +26,37 @@ export function resolveSpreadsheetCellStyle(
 ): SpreadsheetResolvedCellStyle {
   const format = styles.cellFormats[styleId ?? 0] ?? {};
   const font = styles.fonts[format.fontId ?? 0] ?? {};
-  const fontSize = font.size ?? 11;
   const fill = styles.fills[format.fillId ?? 0] ?? {};
   const border = styles.borders[format.borderId ?? 0] ?? {};
+  return {
+    ...resolveTextStyle(font),
+    fillColor: fill.foregroundColor?.rgb ?? '#FFFFFF',
+    hasFill: fill.foregroundColor !== undefined && fill.patternType !== 'none',
+    wrapText: format.alignment?.wrapText === true,
+    border,
+    horizontalAlign: resolveHorizontalAlign(format, cell),
+    verticalAlign: resolveVerticalAlign(format),
+  };
+}
+
+export function resolveSpreadsheetRunStyle(
+  styles: ExcelStylesModel,
+  styleId: number | undefined,
+  run: ExcelRichTextRun,
+): SpreadsheetTextStyle {
+  const base = styles.fonts[styles.cellFormats[styleId ?? 0]?.fontId ?? 0] ?? {};
+  if (!run.font) return resolveTextStyle(base);
+  const { name, size, color, bold, italic, underline } = run.font;
+  return resolveTextStyle({ name: name ?? base.name, size: size ?? base.size, color: color ?? base.color, bold, italic, underline });
+}
+
+function resolveTextStyle(font: ExcelFontModel): SpreadsheetTextStyle {
+  const fontSize = font.size ?? 11;
   return {
     font: canvasFont(font.bold, font.italic, fontSize, font.name ?? 'Arial'),
     fontSize,
     underline: font.underline === true,
     fontColor: font.color?.rgb ?? '#111827',
-    fillColor: fill.foregroundColor?.rgb ?? '#FFFFFF',
-    wrapText: format.alignment?.wrapText === true,
-    border,
-    horizontalAlign: resolveHorizontalAlign(format, cell),
-    verticalAlign: resolveVerticalAlign(format),
   };
 }
 

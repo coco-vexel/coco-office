@@ -2,6 +2,7 @@ import { deletePart, getPart, markDirty, type Package } from '../pack/index.js';
 import { formatRangeAddress, parseCellAddress, parseRangeAddress } from './address.js';
 import type { ExcelCellModel, ExcelSheetModel, ExcelWorkbookModel } from './model.js';
 import { REL_NS, SS_NS } from './namespaces.js';
+import { createExcelRichTextElement, excelCellRichText } from './rich-text.js';
 
 const CALC_CHAIN_REL_TYPE =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain';
@@ -20,6 +21,7 @@ export interface ExcelWorksheetCellPatch {
 export function collectContentOnlyCellPatches(
   before: ExcelWorkbookModel,
   after: ExcelWorkbookModel,
+  allowDrawingPositionChanges = false,
 ): ExcelWorksheetCellPatch[] | null {
   if (
     !sameJson(before.sharedStrings, after.sharedStrings) ||
@@ -34,7 +36,10 @@ export function collectContentOnlyCellPatches(
   for (let index = 0; index < before.sheets.length; index += 1) {
     const previousSheet = before.sheets[index]!;
     const currentSheet = after.sheets[index]!;
-    if (!sameJson(sheetWithoutCellContent(previousSheet), sheetWithoutCellContent(currentSheet))) {
+    const previousMetadata = sheetWithoutCellContent(previousSheet);
+    const currentMetadata = sheetWithoutCellContent(currentSheet);
+    if (allowDrawingPositionChanges) currentMetadata.drawings = previousMetadata.drawings;
+    if (!sameJson(previousMetadata, currentMetadata)) {
       return null;
     }
 
@@ -239,6 +244,11 @@ function patchCellContent(document: Document, cell: Element, model: ExcelCellMod
 
   if (model.kind === 'string') {
     cell.setAttribute('t', 'inlineStr');
+    const richText = excelCellRichText(model);
+    if (richText) {
+      cell.insertBefore(createExcelRichTextElement(document, richText), insertionPoint ?? null);
+      return;
+    }
     const inline = document.createElementNS(SS_NS, 'is');
     const text = document.createElementNS(SS_NS, 't');
     const value = String(model.value ?? '');

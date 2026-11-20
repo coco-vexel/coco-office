@@ -17,6 +17,7 @@ import type {
   ExcelColumnModel,
   ExcelHyperlinkModel,
   ExcelMergedRangeModel,
+  ExcelRichTextRun,
   ExcelRowModel,
   ExcelSheetModel,
   ExcelSheetViewModel,
@@ -33,7 +34,9 @@ import type {
   ExcelWorkbookModel,
 } from './model.js';
 import { parseCellAddress } from './address.js';
-import { parseStyles } from './styles-reader.js';
+import { parseStyles, parseThemeColors, themeColorByName, type ThemeColors } from './styles-reader.js';
+import { applyExcelTint, ooxmlArgbToExcelColor } from './color.js';
+import { cloneExcelRichText, readExcelStringContent, type ExcelStringContent } from './rich-text.js';
 import type { WorkbookSheetRef } from './workbook-reader.js';
 import { parseDefinedNames, parseSharedStrings, parseWorkbookDate1904, parseWorkbookSheets } from './workbook-reader.js';
 
@@ -188,8 +191,9 @@ function setIfDefined<T extends object, K extends keyof T>(target: T, key: K, va
 
 function parseCell(
   cell: Element,
-  sharedStrings: string[],
+  sharedStrings: ExcelStringContent[],
   date1904: boolean,
+  themeColors: ThemeColors,
 ): ExcelCellModel | null {
   const address = cell.getAttribute('r');
   if (!address) return null;
@@ -201,20 +205,19 @@ function parseCell(
   let kind: ExcelCellKind = formula ? 'formula' : 'blank';
   let value: string | number | boolean | null = null;
   let sharedStringIndex: number | undefined;
+  let richText: ExcelRichTextRun[] | undefined;
 
   if (dataType === 's') {
     sharedStringIndex = rawValue === undefined ? undefined : Number(rawValue);
-    value =
-      sharedStringIndex === undefined || !Number.isInteger(sharedStringIndex)
-        ? null
-        : (sharedStrings[sharedStringIndex] ?? null);
+    const shared = sharedStringIndex === undefined ? undefined : sharedStrings[sharedStringIndex];
+    value = shared?.text ?? null;
+    if (shared?.richText && !formula) richText = cloneExcelRichText(shared.richText);
     kind = formula ? 'formula' : 'string';
   } else if (dataType === 'inlineStr') {
     const inline = firstChildNs(cell, SS_NS, 'is');
-    const tEls = inline?.getElementsByTagNameNS(SS_NS, 't') ?? [];
-    let text = '';
-    for (let i = 0; i < tEls.length; i++) text += textOf(tEls[i]);
-    value = text;
+    const content = inline ? readExcelStringContent(inline, themeColors) : undefined;
+    value = content?.text ?? '';
+    if (!formula) richText = content?.richText;
     kind = formula ? 'formula' : 'string';
   } else if (dataType === 'b') {
     value = rawValue === '1';
@@ -234,7 +237,7 @@ function parseCell(
     kind = formula ? 'formula' : 'number';
   }
 
-  return {
+  const model: ExcelCellModel = {
     address,
     row,
     column,
@@ -246,6 +249,8 @@ function parseCell(
     styleId: styleIdRaw === null ? undefined : Number(styleIdRaw),
     sharedStringIndex,
   };
+  setIfDefined(model, 'richText', richText);
+  return model;
 }
 
 function parseColumns(sheetDom: Document): ExcelColumnModel[] {
@@ -596,14 +601,36 @@ function drawingObjectName(parent: Element): string | undefined {
   return firstDescendantLocal(parent, 'cNvPr')?.getAttribute('name') ?? undefined;
 }
 
-function parseDrawingObject(anchorEl: Element, rels: Map<string, Relationship>, drawingPath: string): ExcelDrawingObjectModel | undefined {
+function drawingColor(element: Element | undefined, themeColors: ThemeColors): string | undefined {
+  const source = element?.firstElementChild;
+  const value = source?.getAttribute('val');
+  if (!source || !value) return undefined;
+  const color = source.localName === 'schemeClr'
+    ? themeColorByName(themeColors, value)
+    : source.localName === 'srgbClr' ? ooxmlArgbToExcelColor(value) : undefined;
+  const lumMod = parseOptionalNumber(firstDescendantLocal(source, 'lumMod')?.getAttribute('val') ?? null);
+  return color && applyExcelTint(color, lumMod === undefined ? undefined : lumMod / 100_000 - 1).rgb;
+}
+
+function directDrawingChild(element: Element | null | undefined, name: string): Element | undefined {
+  return element ? Array.from(element.children).find((child) => child.localName === name) : undefined;
+}
+
+function parseDrawingObject(
+  anchorEl: Element,
+  rels: Map<string, Relationship>,
+  drawingPath: string,
+  themeColors: ThemeColors,
+): ExcelDrawingObjectModel | undefined {
+  const name = drawingObjectName(anchorEl);
+  const hidden = parseBooleanAttr(firstDescendantLocal(anchorEl, 'cNvPr')?.getAttribute('hidden') ?? null);
   const chartEl = firstDescendantLocal(anchorEl, 'chart');
   if (chartEl) {
     const relationshipId = chartEl.getAttributeNS(OFFICE_REL_NS, 'id') ?? undefined;
     const rel = relationshipId ? rels.get(relationshipId) : undefined;
     return {
       kind: 'chart',
-      name: drawingObjectName(anchorEl),
+      name,
       relationshipId,
       targetPath: rel ? resolveRelationshipTarget(drawingPath, rel.target) : undefined,
       targetMode: rel?.targetMode,
@@ -615,17 +642,34 @@ function parseDrawingObject(anchorEl: Element, rels: Map<string, Relationship>, 
     const relationshipId =
       blipEl.getAttributeNS(OFFICE_REL_NS, 'embed') ?? blipEl.getAttributeNS(OFFICE_REL_NS, 'link') ?? undefined;
     const rel = relationshipId ? rels.get(relationshipId) : undefined;
-    return {
+    const object: ExcelDrawingObjectModel = {
       kind: 'image',
-      name: drawingObjectName(anchorEl),
+      name,
       relationshipId,
       targetPath: rel ? resolveRelationshipTarget(drawingPath, rel.target) : undefined,
       targetMode: rel?.targetMode,
     };
+    if (hidden) object.hidden = true;
+    return object;
   }
 
-  if (firstDescendantLocal(anchorEl, 'sp')) {
-    return { kind: 'shape', name: drawingObjectName(anchorEl) };
+  const shape = firstDescendantLocal(anchorEl, 'sp');
+  if (shape) {
+    const object: ExcelDrawingObjectModel = { kind: 'shape', name };
+    if (hidden) object.hidden = true;
+    if (shape.parentNode !== anchorEl) return object;
+    const properties = directDrawingChild(shape, 'spPr');
+    const preset = directDrawingChild(properties, 'prstGeom')?.getAttribute('prst');
+    if (!preset) return object;
+    object.presetGeometry = preset;
+    const style = directDrawingChild(shape, 'style');
+    const line = directDrawingChild(properties, 'ln');
+    setIfDefined(object, 'fillColor', directDrawingChild(properties, 'noFill') ? 'none'
+      : drawingColor(directDrawingChild(properties, 'solidFill') ?? directDrawingChild(style, 'fillRef'), themeColors));
+    setIfDefined(object, 'lineColor', directDrawingChild(line, 'noFill') ? 'none'
+      : drawingColor(directDrawingChild(line, 'solidFill') ?? directDrawingChild(style, 'lnRef'), themeColors));
+    setIfDefined(object, 'lineWidth', parseOptionalNumber(line?.getAttribute('w') ?? null));
+    return object;
   }
   if (firstDescendantLocal(anchorEl, 'graphicFrame')) {
     return { kind: 'graphicFrame', name: drawingObjectName(anchorEl) };
@@ -633,7 +677,12 @@ function parseDrawingObject(anchorEl: Element, rels: Map<string, Relationship>, 
   return undefined;
 }
 
-function parseDrawingAnchors(drawingDom: Document, rels: Map<string, Relationship>, drawingPath: string): ExcelDrawingAnchorModel[] {
+function parseDrawingAnchors(
+  drawingDom: Document,
+  rels: Map<string, Relationship>,
+  drawingPath: string,
+  themeColors: ThemeColors,
+): ExcelDrawingAnchorModel[] {
   const anchors: ExcelDrawingAnchorModel[] = [];
   const specs = [
     ['twoCellAnchor', 'twoCell'],
@@ -646,7 +695,28 @@ function parseDrawingAnchors(drawingDom: Document, rels: Map<string, Relationshi
       const anchor: ExcelDrawingAnchorModel = { kind };
       setIfDefined(anchor, 'from', parseDrawingMarker(anchorEl, 'from'));
       setIfDefined(anchor, 'to', parseDrawingMarker(anchorEl, 'to'));
-      setIfDefined(anchor, 'object', parseDrawingObject(anchorEl, rels, drawingPath));
+      const position = directDrawingChild(anchorEl, 'pos');
+      const extent = directDrawingChild(anchorEl, 'ext');
+      setIfDefined(anchor, 'x', parseOptionalNumber(position?.getAttribute('x') ?? null));
+      setIfDefined(anchor, 'y', parseOptionalNumber(position?.getAttribute('y') ?? null));
+      setIfDefined(anchor, 'width', parseOptionalNumber(extent?.getAttribute('cx') ?? null));
+      setIfDefined(anchor, 'height', parseOptionalNumber(extent?.getAttribute('cy') ?? null));
+      const object = parseDrawingObject(anchorEl, rels, drawingPath, themeColors);
+      setIfDefined(anchor, 'object', object);
+      if (object?.kind === 'image' || object?.kind === 'shape') {
+        const drawing = directDrawingChild(anchorEl, object.kind === 'image' ? 'pic' : 'sp');
+        const transform = directDrawingChild(directDrawingChild(drawing, 'spPr'), 'xfrm');
+        if (transform) {
+          const offset = directDrawingChild(transform, 'off');
+          const size = directDrawingChild(transform, 'ext');
+          anchor.transform = {
+            x: parseOptionalNumber(offset?.getAttribute('x') ?? null),
+            y: parseOptionalNumber(offset?.getAttribute('y') ?? null),
+            width: parseOptionalNumber(size?.getAttribute('cx') ?? null),
+            height: parseOptionalNumber(size?.getAttribute('cy') ?? null),
+          };
+        }
+      }
       anchors.push(anchor);
     }
   }
@@ -673,7 +743,12 @@ function parseChartPart(pkg: Package, relationshipId: string | undefined, drawin
   return chart;
 }
 
-function parseDrawings(pkg: Package, sheetPath: string, sheetDom: Document): {
+function parseDrawings(
+  pkg: Package,
+  sheetPath: string,
+  sheetDom: Document,
+  themeColors: ThemeColors,
+): {
   drawings: ExcelDrawingModel[];
   charts: ExcelChartModel[];
   images: ExcelImageModel[];
@@ -695,7 +770,7 @@ function parseDrawings(pkg: Package, sheetPath: string, sheetDom: Document): {
 
     const drawingPart = optionalXmlPart(pkg, drawingPath);
     const drawingRels = parseRelationships(optionalXmlPart(pkg, drawingRelationshipPartPath(drawingPath)));
-    const anchors = drawingPart?.xmlDom ? parseDrawingAnchors(drawingPart.xmlDom, drawingRels, drawingPath) : [];
+    const anchors = drawingPart?.xmlDom ? parseDrawingAnchors(drawingPart.xmlDom, drawingRels, drawingPath, themeColors) : [];
     drawings.push({ relationshipId, path: drawingPath, anchors });
 
     for (const anchor of anchors) {
@@ -714,6 +789,40 @@ function parseDrawings(pkg: Package, sheetPath: string, sheetDom: Document): {
   }
 
   return { drawings, charts, images };
+}
+
+/** Read the visual previews of embedded worksheet objects without opening their payloads. */
+export function readExcelEmbeddedObjectPreviews(pkg: Package, sheetPath: string): ExcelDrawingAnchorModel[] {
+  const sheet = optionalXmlPart(pkg, sheetPath)?.xmlDom;
+  if (!sheet) return [];
+  const rels = parseRelationships(optionalXmlPart(pkg, sheetRelationshipPartPath(sheetPath)));
+  const previews: ExcelDrawingAnchorModel[] = [];
+  const seen = new Set<string>();
+  for (const item of descendantsLocal(sheet, 'oleObject')) {
+    const properties = directDrawingChild(item, 'objectPr');
+    const anchor = directDrawingChild(properties, 'anchor');
+    const from = anchor && parseDrawingMarker(anchor, 'from');
+    const to = anchor && parseDrawingMarker(anchor, 'to');
+    if (!from || !to) continue;
+    const shapeId = item.getAttribute('shapeId');
+    if (shapeId && seen.has(shapeId)) continue;
+    if (shapeId) seen.add(shapeId);
+    const payload = rels.get(item.getAttributeNS(OFFICE_REL_NS, 'id') ?? '');
+    const preview = rels.get(properties?.getAttributeNS(OFFICE_REL_NS, 'id') ?? '');
+    previews.push({
+      kind: 'twoCell',
+      from,
+      to,
+      object: {
+        kind: 'image',
+        name: payload?.targetMode !== 'External' ? payload?.target.split('/').pop() : undefined,
+        targetPath: preview && preview.targetMode !== 'External' && preview.type.endsWith('/image')
+          ? resolveRelationshipTarget(sheetPath, preview.target)
+          : undefined,
+      },
+    });
+  }
+  return previews;
 }
 
 function parsePane(sheetViewEl: Element): ExcelPaneModel | undefined {
@@ -763,8 +872,9 @@ function parseSheetViews(sheetDom: Document): ExcelSheetViewModel[] {
 function parseSheet(
   pkg: Package,
   ref: WorkbookSheetRef,
-  sharedStrings: string[],
+  sharedStrings: ExcelStringContent[],
   date1904: boolean,
+  themeColors: ThemeColors,
 ): ExcelSheetModel {
   if (!ref.path) {
     return {
@@ -809,10 +919,10 @@ function parseSheet(
   const cellEls = part.xmlDom.getElementsByTagNameNS(SS_NS, 'c');
   const cells: ExcelCellModel[] = [];
   for (let i = 0; i < cellEls.length; i++) {
-    const parsed = cellEls[i] ? parseCell(cellEls[i]!, sharedStrings, date1904) : null;
+    const parsed = cellEls[i] ? parseCell(cellEls[i]!, sharedStrings, date1904, themeColors) : null;
     if (parsed) cells.push(parsed);
   }
-  const drawingInfo = parseDrawings(pkg, ref.path, part.xmlDom);
+  const drawingInfo = parseDrawings(pkg, ref.path, part.xmlDom, themeColors);
   return {
     ...ref,
     dimension,
@@ -834,14 +944,15 @@ function parseSheet(
 }
 
 export function readWorkbookModel(pkg: Package): ExcelWorkbookModel {
-  const sharedStrings = parseSharedStrings(pkg);
   const sheetRefs = parseWorkbookSheets(pkg);
   const date1904 = parseWorkbookDate1904(pkg);
+  const themeColors = parseThemeColors(pkg);
+  const sharedStrings = parseSharedStrings(pkg, themeColors);
   return {
     date1904,
-    sharedStrings,
+    sharedStrings: sharedStrings.map((entry) => entry.text),
     definedNames: parseDefinedNames(pkg),
-    styles: parseStyles(pkg),
-    sheets: sheetRefs.map((sheet) => parseSheet(pkg, sheet, sharedStrings, date1904)),
+    styles: parseStyles(pkg, themeColors),
+    sheets: sheetRefs.map((sheet) => parseSheet(pkg, sheet, sharedStrings, date1904, themeColors)),
   };
 }

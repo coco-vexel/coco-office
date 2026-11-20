@@ -1,6 +1,7 @@
 import { ExcelCell, ExcelRange } from './range.js';
 import type { ExcelDrawingMarkerModel, ExcelSheetModel, ExcelSheetViewModel, ExcelWorkbookModel } from './model.js';
 import type { ExcelMutationRecorder } from './mutations.js';
+import { cloneExcelCell } from './rich-text.js';
 import {
   ExcelChartCollection,
   ExcelCommentCollection,
@@ -395,7 +396,7 @@ export class ExcelWorksheet {
   }
 
   cells() {
-    return this.model.cells.map((cell) => ({ ...cell }));
+    return this.model.cells.map(cloneExcelCell);
   }
 
   sheetViews() {
@@ -440,7 +441,7 @@ export class ExcelWorksheet {
       drawings: this.drawings.toModel(),
       charts: this.charts.toModel(),
       images: this.images.toModel(),
-      cells: this.model.cells.map((cell) => ({ ...cell })),
+      cells: this.model.cells.map(cloneExcelCell),
     };
   }
 
