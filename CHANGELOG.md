@@ -2,6 +2,18 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.12] - 2026-11-20
+
+### Added
+
+- Render worksheet pictures, supported shapes, and embedded object previews.
+- Select, move, and resize pictures and supported shapes in editable worksheets.
+
+### Fixed
+
+- Preserve Excel rich text styles through reading, rendering, cell editing, undo, and export.
+- Hide default gridlines on filled cells and retain mouse drag selections.
+
 ## [1.0.11] - 2026-11-19
 
 ### Fixed
@@ -131,6 +143,7 @@ All notable changes to Coco Office are documented in this file.
 
 [1.0.9]: https://github.com/coco-vexel/coco-office/compare/v1.0.8...v1.0.9
 [1.0.10]: https://github.com/coco-vexel/coco-office/compare/v1.0.9...v1.0.10
+[1.0.12]: https://github.com/coco-vexel/coco-office/compare/v1.0.11...v1.0.12
 [1.0.11]: https://github.com/coco-vexel/coco-office/compare/v1.0.10...v1.0.11
 [1.0.8]: https://github.com/coco-vexel/coco-office/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/coco-vexel/coco-office/compare/v1.0.6...v1.0.7
