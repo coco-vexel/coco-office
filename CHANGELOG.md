@@ -2,6 +2,18 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.13] - 2026-11-24
+
+### Added
+
+- Add Word section page layout APIs for paper size, orientation, four margins in points, and vertical alignment.
+- Allow Word plans to set horizontal character scale on text ranges.
+
+### Fixed
+
+- Preserve Word character scale during browser editing and export.
+- Keep exact-height Word lines on their intended pages and honor section vertical alignment in the browser editor.
+
 ## [1.0.12] - 2026-11-20
 
 ### Added
@@ -143,6 +155,7 @@ All notable changes to Coco Office are documented in this file.
 
 [1.0.9]: https://github.com/coco-vexel/coco-office/compare/v1.0.8...v1.0.9
 [1.0.10]: https://github.com/coco-vexel/coco-office/compare/v1.0.9...v1.0.10
+[1.0.13]: https://github.com/coco-vexel/coco-office/compare/v1.0.12...v1.0.13
 [1.0.12]: https://github.com/coco-vexel/coco-office/compare/v1.0.11...v1.0.12
 [1.0.11]: https://github.com/coco-vexel/coco-office/compare/v1.0.10...v1.0.11
 [1.0.8]: https://github.com/coco-vexel/coco-office/compare/v1.0.7...v1.0.8
