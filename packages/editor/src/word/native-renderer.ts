@@ -39,6 +39,30 @@ export function defineNativeWordElements(): void {
   defineElement('coco-word-native-p');
   defineElement('coco-word-native-drawing');
   defineElement('coco-word-native-table');
+  if (!customElements.get('coco-word-native-scaled-run')) {
+    customElements.define('coco-word-native-scaled-run', class extends HTMLElement {
+      private observer?: ResizeObserver;
+
+      connectedCallback() {
+        const ink = this.firstElementChild;
+        if (!(ink instanceof HTMLElement)) return;
+        const scale = Number(this.dataset.characterScale) / 100;
+        const updateWidth = () => {
+          this.style.width = `${ink.offsetWidth * scale}px`;
+        };
+        updateWidth();
+        if (typeof ResizeObserver === 'function') {
+          this.observer = new ResizeObserver(updateWidth);
+          this.observer.observe(ink);
+        }
+      }
+
+      disconnectedCallback() {
+        this.observer?.disconnect();
+        this.observer = undefined;
+      }
+    });
+  }
 }
 
 export function renderNativeDocument(doc: NativeWordDocument): HTMLElement {
@@ -1958,6 +1982,11 @@ function applyNativePageLayout(
 ): void {
   page.style.width = twipsToPx(layout.width);
   page.style.height = twipsToPx(layout.height);
+  if (layout.verticalAlignment && layout.verticalAlignment !== 'top') {
+    page.dataset.verticalAlignment = layout.verticalAlignment;
+  } else {
+    delete page.dataset.verticalAlignment;
+  }
   const topMargin = Math.abs(layout.margin.top);
   page.toggleAttribute('data-fixed-top-margin', layout.margin.top < 0);
   page.style.paddingTop = twipsToPx(topMargin);
@@ -2197,11 +2226,30 @@ export function renderNativeParagraph(paragraph: NativeWordParagraphNode, option
     return el;
   }
   const isPageStory = paragraph.story.startsWith('header:') || paragraph.story.startsWith('footer:');
+  const spacing = paragraph.format?.spacing;
   for (const child of paragraph.content) {
     if (child.kind === 'text') {
       const run = renderNativeText(child);
+      if (
+        paragraph.content.length === 1 &&
+        spacing?.lineRule === 'exact' && spacing.line !== undefined && spacing.line > 0 &&
+        child.format?.characterScale !== undefined && !/[\r\n\t]/.test(child.text) &&
+        run instanceof HTMLElement
+      ) {
+        // A scaled single line has an authored height. Let a block reserve it without
+        // adding the surrounding paragraph's inline baseline to that height.
+        el.style.minHeight = '0';
+        run.style.display = 'flex';
+        run.style.height = twipsToPt(spacing.line);
+        run.style.lineHeight = '1';
+        run.style.alignItems = 'center';
+        run.style.justifyContent = paragraph.format?.alignment === 'center'
+          ? 'center'
+          : paragraph.format?.alignment === 'right' ? 'flex-end' : 'flex-start';
+        run.style.overflow = 'hidden';
+      }
       const family = child.format?.fontFamily ?? paragraph.format?.fontFamily ?? '';
-      if (isPageStory && /^(宋体|SimSun)$/i.test(family) && / {2}/.test(child.text)) {
+      if (isPageStory && (child.format?.characterScale ?? 100) === 100 && /^(宋体|SimSun)$/i.test(family) && / {2}/.test(child.text)) {
         // Keep authored spaces selectable at the half-em SimSun advance, even with a substitute font.
         const wrapper = run instanceof HTMLElement ? run : document.createElement('span');
         wrapper.replaceChildren(...child.text.split(/( {2,})/).filter(Boolean).map((part) => {
@@ -2495,10 +2543,11 @@ function renderNativeDrawingParagraph(paragraph: NativeWordParagraphNode): HTMLE
 function renderNativeText(child: NativeWordParagraphNode['content'][number]): Node {
   if (child.kind !== 'text') return document.createTextNode('');
   const runStyle = resolveRunStyle(child.format).cssText;
+  const characterScale = child.format?.characterScale ?? 100;
   const commentMark = child.marks?.find((mark) => mark.kind === 'comment');
   const revisionMark = child.marks?.find((mark) => mark.kind === 'revision');
   const formatRevision = child.formatRevision;
-  if (!commentMark && !revisionMark && !formatRevision && !child.hyperlink && runStyle.length === 0) return document.createTextNode(child.text);
+  if (!commentMark && !revisionMark && !formatRevision && !child.hyperlink && runStyle.length === 0 && characterScale === 100) return document.createTextNode(child.text);
 
   const span = child.hyperlink ? document.createElement('a') : document.createElement('span');
   if (runStyle.length > 0) span.setAttribute('style', runStyle);
@@ -2544,7 +2593,23 @@ function renderNativeText(child: NativeWordParagraphNode['content'][number]): No
     span.dataset.revisionDate = formatRevision.date ?? '';
     span.title = '格式修订';
   }
-  span.appendChild(document.createTextNode(child.text));
+  if (characterScale === 100) {
+    span.textContent = child.text;
+  } else {
+    const scaled = document.createElement('coco-word-native-scaled-run');
+    scaled.dataset.characterScale = String(characterScale);
+    scaled.style.display = 'inline-block';
+    // Keep the shaped text's height and let the inline box occupy the scaled width.
+    scaled.style.overflowX = 'clip';
+    const ink = document.createElement('span');
+    ink.style.display = 'inline-block';
+    ink.style.whiteSpace = 'pre';
+    ink.style.transform = `scaleX(${characterScale / 100})`;
+    ink.style.transformOrigin = 'left';
+    ink.textContent = child.text;
+    scaled.appendChild(ink);
+    span.appendChild(scaled);
+  }
   return span;
 }
 

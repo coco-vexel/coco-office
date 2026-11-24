@@ -88,6 +88,7 @@ export {
 export {
   listSections,
   type SectionInfo,
+  type SectionPageLayout,
   type SectionType,
   type HeaderFooterRef,
   type HeaderFooterType,

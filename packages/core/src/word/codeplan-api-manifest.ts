@@ -207,6 +207,7 @@ const groups = [
   group('doc.styles', 'style', 'read', ['list', 'get']),
   group('doc.context', 'context', 'read', ['search']),
   group('doc.sections', 'section', 'read', ['list']),
+  group('doc.sections', 'section', 'write', ['setPageLayout']),
   group('doc.tocFields', 'toc', 'read', ['list']),
   group('doc', 'document', 'write', ['appendParagraph']),
   group(

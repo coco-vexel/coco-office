@@ -263,8 +263,7 @@ coco-word-native-page {
   box-sizing: border-box;
   max-width: 100%;
   background: #ffffff;
-  border: 1px solid #d8dbe2;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 0 0 1px #d8dbe2, 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 
 coco-word-native-page-body {
@@ -287,6 +286,22 @@ coco-word-native-document.uses-natural-paragraph-flow coco-word-native-page-body
 
 coco-word-native-document.uses-natural-paragraph-flow coco-word-native-page-body > * {
   display: block;
+}
+
+coco-word-native-page[data-vertical-alignment] > coco-word-native-page-body {
+  display: flex;
+}
+
+coco-word-native-page[data-vertical-alignment="center"] > coco-word-native-page-body {
+  justify-content: safe center;
+}
+
+coco-word-native-page[data-vertical-alignment="bottom"] > coco-word-native-page-body {
+  justify-content: safe end;
+}
+
+coco-word-native-page[data-vertical-alignment="both"] > coco-word-native-page-body {
+  justify-content: space-between;
 }
 
 .coco-word-native-page-behind-layer,

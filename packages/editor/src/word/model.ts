@@ -150,6 +150,7 @@ export interface EditorRunFormat {
   fontFamily?: string;
   color?: string;
   characterSpacing?: number;
+  characterScale?: number;
   verticalAlign?: 'baseline' | 'superscript' | 'subscript';
   highlight?: string;
   shading?: EditorShading;
@@ -330,6 +331,7 @@ export interface EditorPageLayout {
     left: number;
   };
   orientation?: 'portrait' | 'landscape';
+  verticalAlignment?: 'top' | 'center' | 'bottom' | 'both';
 }
 
 export interface EditorHeaderFooterRef {

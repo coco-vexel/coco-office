@@ -62,6 +62,7 @@ import {
 import { executeInsertImageAfter } from './insert-image-ops.js';
 import { executeInsertTableFrom } from './insert-table-ops.js';
 import { executeSetUpdateFields } from './settings-ops.js';
+import { executeSetSectionPageLayout } from './section-ops.js';
 
 export type { ExecutorContext } from './executor-context.js';
 
@@ -181,6 +182,9 @@ export function dispatchOp(op: Op, ctx: ExecutorContext): void {
     // task-core-update-fields
     case 'setUpdateFields':
       executeSetUpdateFields(ctx, op);
+      return;
+    case 'setSectionPageLayout':
+      executeSetSectionPageLayout(ctx, op);
       return;
     default: {
       // 类型穷尽兜底

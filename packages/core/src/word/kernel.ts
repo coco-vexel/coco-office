@@ -862,9 +862,9 @@ function collectAffectedPartPaths(
           }
           break;
         }
-        case 'insertParagraphAtBodyStart': {
-          // 无锚点 op：直接纳入 body part（<w:document>/<w:body> 所在 part）。
-          const [bodyStory] = listStories(pkg, { kinds: ['body'] });
+        case 'insertParagraphAtBodyStart':
+        case 'setSectionPageLayout': {
+          const bodyStory = stories.find((story) => story.kind === 'body');
           if (bodyStory) paths.add(bodyStory.partPath);
           break;
         }

@@ -1242,7 +1242,8 @@ function validateTextFormat(
     op.format.underline === undefined &&
     op.format.highlight === undefined &&
     op.format.fontSize === undefined &&
-    op.format.fontFamily === undefined
+    op.format.fontFamily === undefined &&
+    op.format.characterScale === undefined
   ) {
     throw new WordError(
       'INVALID_ARGUMENT',
@@ -1290,19 +1291,20 @@ function validateTextFormat(
       { paraId: op.paraId, opType: 'formatTextInParagraph' },
     );
   }
+  const { characterScale } = op.format;
+  if (characterScale !== undefined && (!Number.isInteger(characterScale) || characterScale < 1 || characterScale > 600)) {
+    throw new WordError(
+      'INVALID_ARGUMENT',
+      'formatTextInParagraph characterScale must be an integer percentage from 1 to 600',
+      ctx.docId,
+      { paraId: op.paraId, characterScale, opType: 'formatTextInParagraph' },
+    );
+  }
 }
 
 function applyRunFormat(
   run: Element,
-  format: {
-    bold?: boolean;
-    color?: string;
-    italic?: boolean;
-    underline?: boolean;
-    highlight?: string;
-    fontSize?: number;
-    fontFamily?: string;
-  },
+  format: Extract<Op, { type: 'formatTextInParagraph' }>['format'],
 ): void {
   const rPr = ensureRunProperties(run);
   if (format.bold !== undefined) {
@@ -1345,6 +1347,11 @@ function applyRunFormat(
       el.setAttributeNS(W_NS, 'w:cs', family);
     });
   }
+  if (format.characterScale !== undefined) {
+    replaceRunProperty(rPr, 'w', (el) => {
+      el.setAttributeNS(W_NS, 'w:val', String(format.characterScale));
+    });
+  }
 }
 
 function ensureRunProperties(run: Element): Element {
@@ -1357,7 +1364,7 @@ function ensureRunProperties(run: Element): Element {
 
 function replaceRunProperty(
   rPr: Element,
-  localName: 'b' | 'i' | 'u' | 'color' | 'highlight' | 'sz' | 'rFonts',
+  localName: 'b' | 'i' | 'u' | 'color' | 'highlight' | 'sz' | 'rFonts' | 'w',
   configure: (el: Element) => void,
 ): void {
   removeRunProperties(rPr, W_NS, localName);

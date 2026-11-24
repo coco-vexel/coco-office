@@ -215,6 +215,10 @@ function parsePageLayoutFromSectPr(sectPr: Element): EditorPageLayout | undefine
   if (parsedDocGrid) layout.docGrid = parsedDocGrid;
   if (orientation === 'landscape') layout.orientation = 'landscape';
   else if (orientation === 'portrait') layout.orientation = 'portrait';
+  const verticalAlignment = firstDirectChild(sectPr, W_NS, 'vAlign')?.getAttributeNS(W_NS, 'val');
+  if (verticalAlignment === 'top' || verticalAlignment === 'center' || verticalAlignment === 'bottom' || verticalAlignment === 'both') {
+    layout.verticalAlignment = verticalAlignment;
+  }
   return layout;
 }
 
@@ -2681,6 +2685,11 @@ function parseRunProperties(rPr: Element, theme?: EditorTheme): EditorRunFormat 
   }
   const characterSpacing = parseCharacterSpacing(rPr);
   if (characterSpacing !== undefined) format.characterSpacing = characterSpacing;
+  const scaleValue = firstDirectChild(rPr, W_NS, 'w')?.getAttributeNS(W_NS, 'val');
+  const characterScale = Number(scaleValue?.replace(/%$/, ''));
+  if (Number.isInteger(characterScale) && characterScale >= 1 && characterScale <= 600) {
+    format.characterScale = characterScale;
+  }
   const verticalAlign = parseVerticalAlign(firstDirectChild(rPr, W_NS, 'vertAlign'));
   if (verticalAlign) format.verticalAlign = verticalAlign;
   const highlight = parseHighlight(firstDirectChild(rPr, W_NS, 'highlight'));

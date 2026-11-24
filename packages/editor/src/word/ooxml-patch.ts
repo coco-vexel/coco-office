@@ -1382,6 +1382,11 @@ function createNativeTableCellElement(
             size.setAttributeNS(W_NS, 'w:val', String(Math.round(child.format.fontSize * 2)));
             runProperties.appendChild(size);
           }
+          if (child.format.characterScale !== undefined) {
+            const scale = create('w');
+            scale.setAttributeNS(W_NS, 'w:val', String(child.format.characterScale));
+            runProperties.appendChild(scale);
+          }
           if (child.format.fontFamily) {
             const fonts = create('rFonts');
             for (const attribute of ['ascii', 'hAnsi', 'eastAsia'])
@@ -2870,6 +2875,12 @@ function applyRunFormat(run: Element, format: Partial<EditorRunFormat>): void {
     const size = doc.createElementNS(W_NS, 'w:sz');
     size.setAttribute('val', String(Math.round(format.fontSize * 2)));
     rPr.appendChild(size);
+  }
+  if (format.characterScale !== undefined) {
+    removeDirectChildren(rPr, 'w');
+    const scale = doc.createElementNS(W_NS, 'w:w');
+    scale.setAttributeNS(W_NS, 'w:val', String(format.characterScale));
+    rPr.appendChild(scale);
   }
   if (format.fontFamily !== undefined) {
     removeDirectChildren(rPr, 'rFonts');

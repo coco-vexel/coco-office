@@ -41,6 +41,30 @@ export interface SectionInfo {
   titlePage?: boolean;
 }
 
+export interface SectionPageLayout {
+  orientation?: 'portrait' | 'landscape';
+  /** Paper dimensions in points, arranged to match the requested orientation. */
+  pageSize?: { width: number; height: number };
+  verticalAlignment?: 'top' | 'center' | 'both' | 'bottom';
+  /** Margins in points. Omitted sides are left as they are. */
+  margins?: { top?: number; bottom?: number; left?: number; right?: number };
+}
+
+/** Returns null for an implicit final section and undefined for an unknown index. */
+export function findSectionProperties(
+  body: Element,
+  sectionIndex: number,
+): Element | null | undefined {
+  let index = 0;
+  for (let child = body.firstElementChild; child; child = child.nextElementSibling) {
+    const inline = paragraphSectionProperties(child);
+    if (!inline) continue;
+    if (index === sectionIndex) return inline;
+    index++;
+  }
+  return index === sectionIndex ? firstDirectChild(body, W_NS, 'sectPr') : undefined;
+}
+
 export function listSections(pkg: Package): SectionInfo[] {
   const stories = listStories(pkg, { kinds: ['body'] });
   if (stories.length === 0) return [];
@@ -67,8 +91,7 @@ export function listSections(pkg: Package): SectionInfo[] {
       lastParaIdInBody = paraId;
 
       // 该段是否承载 sectPr？
-      const pPr = firstDirectChild(el, W_NS, 'pPr');
-      const inlineSectPr = pPr ? firstDirectChild(pPr, W_NS, 'sectPr') : null;
+      const inlineSectPr = paragraphSectionProperties(el);
       if (inlineSectPr) {
         out.push(
           buildSection(sectionIndex++, sectionFirstParaId, paraId, inlineSectPr, pkg, relsPath),
@@ -88,6 +111,12 @@ export function listSections(pkg: Package): SectionInfo[] {
   }
 
   return out;
+}
+
+function paragraphSectionProperties(el: Element): Element | null {
+  if (el.namespaceURI !== W_NS || el.localName !== 'p') return null;
+  const pPr = firstDirectChild(el, W_NS, 'pPr');
+  return pPr ? firstDirectChild(pPr, W_NS, 'sectPr') : null;
 }
 
 // ─────────── 内部 ───────────

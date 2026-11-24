@@ -32,6 +32,14 @@ const plan = doc.plan({
 
 `apply()` is one-shot. Do not append operations or call `apply()` again after a plan has been applied.
 
+## Section Operations
+
+| API | Purpose |
+| --- | --- |
+| `setSectionPageLayout(sectionIndex, layout)` | Update the orientation and/or margins of an explicit section in the same transaction as other plan operations. |
+
+Use `trackChanges: false` for page layout edits. See [Section APIs](../domains/sections.md) for `SectionPageLayout`.
+
 ## Paragraph Operations
 
 | API | Purpose |
@@ -75,6 +83,7 @@ Common params:
 | `highlight` | `string` |
 | `fontSize` | `number` |
 | `fontFamily` | `string` |
+| `characterScale` | Integer percentage from `1` to `600` (normal width is `100`). |
 
 `InsertParagraphSpec`:
 

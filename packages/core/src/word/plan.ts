@@ -25,6 +25,7 @@ import type { WordErrorCode } from './word-error.js';
 import type { SdtSpec } from './sdt-builders.js';
 import type { RowHeight } from './list-tables.js';
 import type { WordTableBorders } from './table-borders.js';
+import type { SectionPageLayout } from './section-queries.js';
 import { WordError } from './word-error.js';
 
 // ─────────── 类型别名(docs/03.1 §1.1 / §1.3 / §1.7)───────────
@@ -221,6 +222,7 @@ export type Op =
         highlight?: string;
         fontSize?: number;
         fontFamily?: string;
+        characterScale?: number;
       };
       scope: 'first' | 'all';
     }
@@ -396,7 +398,8 @@ export type Op =
   // task-core-update-fields 设 settings.xml 的 updateFields（让含 TOC 域的文档打开时自动更新域）
   //  - enabled=true → 写/更新 <w:updateFields w:val="true"/>
   //  - enabled=false → 写 <w:updateFields w:val="false"/>
-  | { type: 'setUpdateFields'; enabled: boolean };
+  | { type: 'setUpdateFields'; enabled: boolean }
+  | { type: 'setSectionPageLayout'; sectionIndex: number; layout: SectionPageLayout };
 
 // ─────────── ApplyResult(docs/03.1 §1.8)───────────
 
@@ -517,6 +520,7 @@ export interface WordPlan {
       highlight?: string;
       fontSize?: number;
       fontFamily?: string;
+      characterScale?: number;
     },
     opts?: { scope?: 'first' | 'all' },
   ): this;
@@ -787,6 +791,9 @@ export interface WordPlan {
    */
   setUpdateFields(enabled: boolean): this;
 
+  /** Updates section page settings in the same transaction as other plan operations. */
+  setSectionPageLayout(sectionIndex: number, layout: SectionPageLayout): this;
+
   apply(): Promise<ApplyResult>;
 
   /** 只读 op 队列,用于调试 / 日志 / 测试 */
@@ -886,6 +893,7 @@ export class WordPlanImpl implements WordPlan {
       highlight?: string;
       fontSize?: number;
       fontFamily?: string;
+      characterScale?: number;
     },
     opts?: { scope?: 'first' | 'all' },
   ): this {
@@ -1239,6 +1247,12 @@ export class WordPlanImpl implements WordPlan {
   setUpdateFields(enabled: boolean): this {
     this.ensureOpen('setUpdateFields');
     this._ops.push({ type: 'setUpdateFields', enabled });
+    return this;
+  }
+
+  setSectionPageLayout(sectionIndex: number, layout: SectionPageLayout): this {
+    this.ensureOpen('setSectionPageLayout');
+    this._ops.push({ type: 'setSectionPageLayout', sectionIndex, layout });
     return this;
   }
 

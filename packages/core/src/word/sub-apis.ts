@@ -49,7 +49,7 @@ import type {
 } from './plan.js';
 import type { WordTableBorders } from './table-borders.js';
 import type { ListRevisionsOptions, RevisionInfo } from './revision-queries.js';
-import type { SectionInfo } from './section-queries.js';
+import type { SectionInfo, SectionPageLayout } from './section-queries.js';
 import type { TocFieldRange } from './toc-queries.js';
 import type { ListStylesOptions, StyleInfo } from './style-queries.js';
 import type { Transport } from './transport.js';
@@ -775,6 +775,8 @@ export interface SectionsApi {
    * 无 body 或文档无 sectPr 时返回空数组。
    */
   list(): Promise<SectionInfo[]>;
+  /** Updates the page direction and/or individual margins of the specified section. */
+  setPageLayout(sectionIndex: number, layout: SectionPageLayout): Promise<ApplyResult>;
 }
 
 export interface TocFieldsApi {
@@ -1630,6 +1632,15 @@ export function createSectionsApi(
     async list() {
       assertNotDisposed();
       return transport.call<SectionInfo[]>('sections.list', []);
+    },
+    setPageLayout(sectionIndex, layout) {
+      assertNotDisposed();
+      return transport.call<ApplyResult>('applyPlan', [
+        {
+          ops: [{ type: 'setSectionPageLayout', sectionIndex, layout }],
+          options: liveObjectApplyOptions(),
+        },
+      ]);
     },
   };
 }
