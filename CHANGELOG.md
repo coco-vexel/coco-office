@@ -2,6 +2,17 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.14] - 2026-11-25
+
+### Added
+
+- Configure first-page, odd-page, and even-page Word section footers with native PAGE fields.
+- Let Word scripts read and replace the active document's Flat OPC snapshot.
+
+### Fixed
+
+- Use default paper dimensions in the editor when a Word document omits section or paper settings.
+
 ## [1.0.13] - 2026-11-24
 
 ### Added

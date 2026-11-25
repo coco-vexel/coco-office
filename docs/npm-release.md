@@ -1,6 +1,6 @@
 # npm release procedure
 
-This procedure targets version `1.0.13` of `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. The workspace root stays private. Check the npm registry for the currently published versions and dist-tags.
+This procedure targets version `1.0.14` of `@coco-vexel/coco-office`, `@coco-vexel/coco-office-editor`, and `@coco-vexel/coco-office-oojson`. The workspace root stays private. Check the npm registry for the currently published versions and dist-tags.
 
 ## Prepare and review
 
@@ -13,12 +13,12 @@ This procedure targets version `1.0.13` of `@coco-vexel/coco-office`, `@coco-vex
 
 ## Publish after explicit approval
 
-Publish the reviewed Core tarball first, followed by Editor and OOJSON. Both depend on Core `^1.0.13`. Do not recursively publish the entire workspace.
+Publish the reviewed Core tarball first, followed by Editor and OOJSON. Both depend on Core `^1.0.14`. Do not recursively publish the entire workspace.
 
 ```bash
-npm publish .release-check/packages/coco-vexel-coco-office-1.0.13.tgz --access public
-npm publish .release-check/packages/coco-vexel-coco-office-editor-1.0.13.tgz --access public
-npm publish .release-check/packages/coco-vexel-coco-office-oojson-1.0.13.tgz --access public
+npm publish .release-check/packages/coco-vexel-coco-office-1.0.14.tgz --access public
+npm publish .release-check/packages/coco-vexel-coco-office-editor-1.0.14.tgz --access public
+npm publish .release-check/packages/coco-vexel-coco-office-oojson-1.0.14.tgz --access public
 ```
 
 Adjust filenames only when approved versions have changed, and regenerate/reverify their tarballs. If a version already exists, choose a new version and update dependents; do not attempt to replace it. Do not rebuild different bytes between review and publish.
