@@ -177,25 +177,22 @@ export function buildWordEditorViewFromPackage(
 }
 
 function extractPageLayout(pkg: Package): EditorPageLayout | undefined {
-  const documentPart = pkg.parts.get('word/document.xml');
-  const documentDom = documentPart?.xmlDom;
-  if (!documentDom) return undefined;
-  const body = documentDom.getElementsByTagNameNS(W_NS, 'body')[0];
+  const body = listStories(pkg, { kinds: ['body'] })[0]?.root;
   if (!body) return undefined;
 
-  const sectPr = findLastBodySectPr(body);
-  if (!sectPr) return undefined;
-  return parsePageLayoutFromSectPr(sectPr);
+  // Word accepts documents with an implicit section or paper size. Use the
+  // same defaults as the blank Word document, without editing the package.
+  return parsePageLayoutFromSectPr(findLastBodySectPr(body));
 }
 
-function parsePageLayoutFromSectPr(sectPr: Element): EditorPageLayout | undefined {
-  const pgSz = firstDirectChild(sectPr, W_NS, 'pgSz');
-  const pgMar = firstDirectChild(sectPr, W_NS, 'pgMar');
-  const docGrid = lastDirectChild(sectPr, W_NS, 'docGrid');
-  const width = pgSz ? numAttr(pgSz, 'w') : undefined;
-  const height = pgSz ? numAttr(pgSz, 'h') : undefined;
-  if (width === undefined || height === undefined) return undefined;
-  const orientation = pgSz ? pgSz.getAttributeNS(W_NS, 'orient') : null;
+function parsePageLayoutFromSectPr(sectPr: Element | null): EditorPageLayout {
+  const pgSz = sectPr ? firstDirectChild(sectPr, W_NS, 'pgSz') : null;
+  const pgMar = sectPr ? firstDirectChild(sectPr, W_NS, 'pgMar') : null;
+  const docGrid = sectPr ? lastDirectChild(sectPr, W_NS, 'docGrid') : null;
+  const orientation = pgSz?.getAttributeNS(W_NS, 'orient');
+  const landscape = orientation === 'landscape';
+  const width = (pgSz ? numAttr(pgSz, 'w') : undefined) ?? (landscape ? 15840 : 12240);
+  const height = (pgSz ? numAttr(pgSz, 'h') : undefined) ?? (landscape ? 12240 : 15840);
 
   const layout: EditorPageLayout = {
     width,
@@ -215,7 +212,7 @@ function parsePageLayoutFromSectPr(sectPr: Element): EditorPageLayout | undefine
   if (parsedDocGrid) layout.docGrid = parsedDocGrid;
   if (orientation === 'landscape') layout.orientation = 'landscape';
   else if (orientation === 'portrait') layout.orientation = 'portrait';
-  const verticalAlignment = firstDirectChild(sectPr, W_NS, 'vAlign')?.getAttributeNS(W_NS, 'val');
+  const verticalAlignment = sectPr ? firstDirectChild(sectPr, W_NS, 'vAlign')?.getAttributeNS(W_NS, 'val') : undefined;
   if (verticalAlignment === 'top' || verticalAlignment === 'center' || verticalAlignment === 'bottom' || verticalAlignment === 'both') {
     layout.verticalAlignment = verticalAlignment;
   }
@@ -391,8 +388,7 @@ function buildFallbackSection(
     footerRefs: collectHeaderFooterRefs(pkg, sectPr, relsPath, 'footerReference'),
     titlePage: firstDirectChild(sectPr, W_NS, 'titlePg') !== null,
   };
-  const pageLayout = parsePageLayoutFromSectPr(sectPr);
-  if (pageLayout) section.pageLayout = pageLayout;
+  section.pageLayout = parsePageLayoutFromSectPr(sectPr);
   const pgNumType = firstDirectChild(sectPr, W_NS, 'pgNumType');
   const pageNumberStart = pgNumType ? numAttr(pgNumType, 'start') : undefined;
   if (pageNumberStart !== undefined) section.pageNumberStart = pageNumberStart;

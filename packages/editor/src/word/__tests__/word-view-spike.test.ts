@@ -3,7 +3,7 @@ import JSZip from 'jszip';
 import { EditorState } from 'prosemirror-state';
 import { fromZip } from '@coco-vexel/coco-office/pack';
 import { buildIndices, W14_NS, W_NS } from '@coco-vexel/coco-office/word-view';
-import { buildWordEditorViewFromPackage } from '../extract.js';
+import { buildWordEditorViewFromFlatOpc, buildWordEditorViewFromPackage } from '../extract.js';
 import { projectWordViewToProseMirror, wordEditorSchema } from '../prosemirror.js';
 
 const CT_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1103,6 +1103,24 @@ describe('@coco-vexel/coco-office-editor word spike', () => {
       fill: '1A334D',
       val: 'clear',
     });
+  });
+
+  test.each([
+    ['', { top: 1440, right: 1440, bottom: 1440, left: 1440 }],
+    ['<w:sectPr><w:pgMar w:left="1000"/></w:sectPr>', { top: 1440, right: 1440, bottom: 1440, left: 1000 }],
+  ])('uses default paper dimensions when section or paper settings are absent (%s)', (section, margin) => {
+    const view = buildWordEditorViewFromFlatOpc(
+      `<pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage">
+        <pkg:part pkg:name="/word/document.xml" pkg:contentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml">
+          <pkg:xmlData><w:document xmlns:w="${W_NS}"><w:body>
+            <w:p><w:r><w:t>测试内容</w:t></w:r></w:p>${section}
+          </w:body></w:document></pkg:xmlData>
+        </pkg:part>
+      </pkg:package>`,
+    );
+
+    expect(view.pageLayout).toEqual({ width: 12240, height: 15840, margin });
+    expect(view.paragraphs[0]?.text).toBe('测试内容');
   });
 
   test('falls back to stable body paragraph ids when extracting sections without w14:paraId', async () => {
