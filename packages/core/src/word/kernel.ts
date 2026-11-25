@@ -224,6 +224,25 @@ export class Kernel {
     }
   }
 
+  /** Replace the active SDK document as a unit, leaving its original load snapshot intact. */
+  async replaceFlatOpc(xml: string): Promise<void> {
+    this.assertLoaded();
+    await this._applyPlanChain;
+    try {
+      const next = pkgFromFlatOpc(xml);
+      if (listStories(next, { kinds: ['body'] }).length !== 1) {
+        throw new Error('Expected exactly one Word document body');
+      }
+      ensureParaIds(next);
+      const indices = buildIndices(next);
+      this.pkg = next;
+      this.indices = indices;
+      this.domainCache.reset();
+    } catch (error) {
+      throw wrapPackageError(error, this.docId!, 'replaceFlatOpc');
+    }
+  }
+
   // ─────────── 只读查询(#24 起)───────────
 
   /**

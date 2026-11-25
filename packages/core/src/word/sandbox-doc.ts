@@ -73,6 +73,9 @@ export interface SandboxDoc {
   readonly drawings: DrawingsApi;
   readonly sections: SectionsApi;
   readonly tocFields: TocFieldsApi;
+  /** Document operations for installed Word scripts. */
+  toFlatOpc(): Promise<string>;
+  replaceFlatOpc(xml: string): Promise<void>;
   appendParagraph(text: string, opts?: ParagraphInsertOptions): Promise<ApplyResult>;
   plan(opts?: PlanOptions): WordPlan;
 }
@@ -154,6 +157,8 @@ export function createSandboxDoc(kernel: Kernel): SandboxDoc {
     drawings: createDrawingsApi(transport, noop),
     sections: createSectionsApi(transport, noop),
     tocFields: createTocFieldsApi(transport, noop),
+    toFlatOpc: () => kernel.toFlatOpc(),
+    replaceFlatOpc: (xml) => kernel.replaceFlatOpc(xml),
     async appendParagraph(text: string, opts: ParagraphInsertOptions = {}): Promise<ApplyResult> {
       const { paragraphs: bodyParagraphs } = await paragraphs.list({
         scope: 'body',

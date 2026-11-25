@@ -255,3 +255,5 @@ export {
   type WordCodePlanApiManifestEntry,
   type WordCodePlanSdkApiPath,
 } from './codeplan-api-manifest.js';
+
+export { setWordSectionFooters, type SectionFooter, type SectionFooters, type FooterPageNumber } from './section-footers.js';
