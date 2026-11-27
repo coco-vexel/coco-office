@@ -2,6 +2,12 @@
 
 All notable changes to Coco Office are documented in this file.
 
+## [1.0.15] - Unreleased
+
+### Fixed
+
+- Honor Word floating tables anchored at the bottom of the page margins and keep single-page tables together during pagination.
+
 ## [1.0.14] - 2026-11-25
 
 ### Added
