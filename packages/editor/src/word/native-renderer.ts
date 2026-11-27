@@ -259,7 +259,8 @@ export function paginateNativeDocument(root: HTMLElement, doc: NativeWordDocumen
     const hasForcedPageBreak = block.querySelector('.coco-word-page-break') !== null;
     if (body.scrollHeight > bodyLimit()) {
       const keepWithPrevious = previousKeepNextBlock(body, block);
-      if (!splitNativeTableAcrossPages(block, body, bodyLimit, nextPage)) {
+      const moveWholeTable = isBottomAnchoredTable(block) && block.getBoundingClientRect().height <= bodyLimit();
+      if (moveWholeTable || !splitNativeTableAcrossPages(block, body, bodyLimit, nextPage)) {
         body.removeChild(block);
         if (keepWithPrevious) body.removeChild(keepWithPrevious);
         const tail = keepWithPrevious ? null : splitNativeParagraphToFitCurrentPage(block, body, bodyLimit);
@@ -268,7 +269,7 @@ export function paginateNativeDocument(root: HTMLElement, doc: NativeWordDocumen
         if (keepWithPrevious) body.appendChild(keepWithPrevious);
         body.appendChild(tail ?? block);
       }
-    } else if (block.matches('coco-word-native-table')) {
+    } else if (block.matches('coco-word-native-table') && !isBottomAnchoredTable(block)) {
       const sectionBreak = nextBlock && sectionBreakTypeAfterBlock(nextBlock, doc);
       const endsSection = nextBlock && sectionBreak && sectionBreak !== 'continuous' &&
         sectionBreak !== 'nextColumn' && !nativeParagraphHasFlowContent(nextBlock);
@@ -463,7 +464,7 @@ function nativePagePairCanBackfill(
 function incrementalBlockGroupHeight(blocks: HTMLElement[]): number {
   return blocks.reduce((height, block) => {
     const style = window.getComputedStyle(block);
-    const marginTop = Number.parseFloat(style.marginTop) || 0;
+    const marginTop = isBottomAnchoredTable(block) ? 0 : Number.parseFloat(style.marginTop) || 0;
     const marginBottom = Number.parseFloat(style.marginBottom) || 0;
     return height + block.getBoundingClientRect().height + marginTop + marginBottom;
   }, 0);
@@ -542,8 +543,11 @@ function moveTrailingIncrementalTableRows(
   templates: { headers: HTMLElement[]; footers: HTMLElement[] },
 ): boolean {
   const body = nativePageBody(page);
-  const sourceBlock = body?.lastElementChild;
+  if (!body) return false;
+  const sourceBlock = body.lastElementChild;
   if (!(sourceBlock instanceof HTMLElement) || !sourceBlock.matches('coco-word-native-table')) return false;
+  if (isBottomAnchoredTable(sourceBlock) &&
+      sourceBlock.getBoundingClientRect().height <= body.getBoundingClientRect().height) return false;
   const sourceTable = sourceBlock.querySelector<HTMLTableElement>(':scope > table');
   const sourceBody = sourceTable?.querySelector<HTMLTableSectionElement>(':scope > tbody');
   if (!sourceTable || !sourceBody) return false;
@@ -1308,29 +1312,31 @@ function isShortFlexFilledTablePage(body: HTMLElement, limit: number): boolean {
 }
 
 function nativeBodyContentHeight(body: HTMLElement): number {
-  let height = 0;
-  for (const child of Array.from(body.children)) {
-    if (!(child instanceof HTMLElement)) continue;
-    const rect = child.getBoundingClientRect();
-    const style = window.getComputedStyle(child);
-    const marginTop = Number.parseFloat(style.marginTop) || 0;
-    const marginBottom = Number.parseFloat(style.marginBottom) || 0;
-    height += rect.height + marginTop + marginBottom;
-  }
-  return height;
+  const blocks = Array.from(body.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
+  return incrementalBlockGroupHeight(blocks);
 }
 
 function nativeBodyContentBottom(body: HTMLElement): number {
   const bodyRect = body.getBoundingClientRect();
   let bottom = 0;
+  let bottomTableHeight = 0;
   for (const child of Array.from(body.children)) {
     if (!(child instanceof HTMLElement)) continue;
     const rect = child.getBoundingClientRect();
     const style = window.getComputedStyle(child);
     const marginBottom = Number.parseFloat(style.marginBottom) || 0;
+    // Count the table's reserved height without treating its auto margin as occupied space.
+    if (isBottomAnchoredTable(child)) {
+      bottomTableHeight += rect.height + marginBottom;
+      continue;
+    }
     bottom = Math.max(bottom, rect.bottom - bodyRect.top + marginBottom);
   }
-  return bottom;
+  return bottom + bottomTableHeight;
+}
+
+function isBottomAnchoredTable(block: HTMLElement): boolean {
+  return block.hasAttribute('data-anchor-bottom-margin');
 }
 
 function tableBottomReservePx(block: HTMLElement, bodyLimit: number): number {
@@ -2744,6 +2750,7 @@ function mapDrawingTextAlign(value: string): string {
 export function renderNativeTable(table: NativeWordTableNode): HTMLElement {
   const el = document.createElement('coco-word-native-table');
   el.setAttribute('data-table-id', table.tableId);
+  if (table.layout?.anchorToBottomMargin) el.setAttribute('data-anchor-bottom-margin', '');
   if (table.revision) {
     el.classList.add(table.revision.revisionKind === 'delete' ? 'coco-word-revision-delete' : 'coco-word-revision-insert');
     el.dataset.revisionId = table.revision.revisionId;

@@ -945,6 +945,12 @@ function parseTableLayout(tableEl: Element, inheritedMode?: EditorTableStyleForm
   const alignment = jc ? parseTableAlignment(jc.getAttributeNS(W_NS, 'val')) : undefined;
   if (alignment !== undefined) layout.alignment = alignment;
 
+  const position = firstDirectChild(tblPr, W_NS, 'tblpPr');
+  if (position?.getAttributeNS(W_NS, 'vertAnchor') === 'margin' &&
+      position.getAttributeNS(W_NS, 'tblpYSpec') === 'bottom') {
+    layout.anchorToBottomMargin = true;
+  }
+
   return Object.keys(layout).length > 0 ? layout : undefined;
 }
 
