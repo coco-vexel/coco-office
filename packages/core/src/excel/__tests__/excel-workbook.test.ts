@@ -840,6 +840,29 @@ describe('ExcelWorkbook', () => {
     expect(workbookXml).toContain('_xlnm.Print_Area');
   });
 
+  test('links cell styles in a new workbook and preserves that link when rewriting it', async () => {
+    const source = await ExcelWorkbook.fromZip(await makeWorkbook());
+    const workbook = ExcelWorkbook.fromModel({ ...source.toModel(), sheets: [] });
+    const range = workbook.worksheets.add('Sheet1').getRange('A1');
+    range.setValues([['天']]);
+    range.format.alignment.setValue({ horizontal: 'center', vertical: 'center' });
+
+    const bytes = await workbook.toZip();
+    const zip = await JSZip.loadAsync(bytes);
+    const relsPath = 'xl/_rels/workbook.xml.rels';
+    const rels = await zip.file(relsPath)!.async('string');
+    const stylesRelationship = /Type="[^"]+\/relationships\/styles" Target="styles\.xml"/g;
+    expect(rels.match(stylesRelationship)).toHaveLength(1);
+    expect(await zip.file('xl/styles.xml')!.async('string')).toContain(
+      '<alignment horizontal="center" vertical="center"/>',
+    );
+
+    const reopened = await ExcelWorkbook.fromZip(bytes);
+    reopened.worksheets.getItem('Sheet1').getRange('A1').format.font.setValue({ size: 26 });
+    const rewritten = await JSZip.loadAsync(await reopened.toZip());
+    expect(await rewritten.file(relsPath)!.async('string')).toBe(rels);
+  });
+
   test('toZip writes package-backed workbook mutations back to xlsx parts', async () => {
     const workbook = await ExcelWorkbook.fromZip(await makeWorkbook());
     const sheet = workbook.worksheets.getItem('Sheet1');

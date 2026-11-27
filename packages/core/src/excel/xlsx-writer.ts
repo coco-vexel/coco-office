@@ -51,6 +51,9 @@ const WORKSHEET_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
 const STYLES_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml';
+const STYLES_PART_PATH = 'xl/styles.xml';
+const STYLES_REL_TYPE =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles';
 const TC_NS = 'http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments';
 const RELS_CONTENT_TYPE = 'application/vnd.openxmlformats-package.relationships+xml';
 const HYPERLINK_REL_TYPE =
@@ -158,6 +161,16 @@ function syncWorkbookRelationships(pkg: Package, model: ExcelWorkbookModel): voi
     changed = true;
   }
 
+  if (!Array.from(rels.values()).some((rel) => rel.type === STYLES_REL_TYPE)) {
+    const id = nextRelationshipId(rels);
+    rels.set(id, {
+      id,
+      type: STYLES_REL_TYPE,
+      target: relativeRelationshipTarget('xl/workbook.xml', STYLES_PART_PATH),
+    });
+    changed = true;
+  }
+
   if (changed) writeRelationshipsPart(pkg, relsPath, rels);
 }
 
@@ -169,13 +182,13 @@ function syncStylesPart(pkg: Package, styles: ExcelStylesModel): void {
   styles.borders = normalized.borders;
   styles.cellFormats = normalized.cellFormats;
   const xml = serializeStyles(styles);
-  const part = getPart(pkg, 'xl/styles.xml');
+  const part = getPart(pkg, STYLES_PART_PATH);
   if (part?.xmlDom) {
     replacePartXml(part, xml);
   } else {
-    setXmlPart(pkg, 'xl/styles.xml', STYLES_CONTENT_TYPE, xml);
+    setXmlPart(pkg, STYLES_PART_PATH, STYLES_CONTENT_TYPE, xml);
   }
-  ensureContentTypeOverride(pkg, 'xl/styles.xml', STYLES_CONTENT_TYPE);
+  ensureContentTypeOverride(pkg, STYLES_PART_PATH, STYLES_CONTENT_TYPE);
 }
 
 export function createWorkbookPackageFromModel(model: ExcelWorkbookModel): Package {

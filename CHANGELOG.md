@@ -2,7 +2,13 @@
 
 All notable changes to Coco Office are documented in this file.
 
-## [1.0.15] - Unreleased
+## [1.0.16] - Unreleased
+
+### Fixed
+
+- Link the workbook stylesheet in Excel exports so external editors keep cell alignment, fonts, and colors.
+
+## [1.0.15] - 2026-11-27
 
 ### Fixed
 
