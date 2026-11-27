@@ -288,6 +288,20 @@ coco-word-native-document.uses-natural-paragraph-flow coco-word-native-page-body
   display: block;
 }
 
+coco-word-native-document.uses-natural-paragraph-flow
+  coco-word-native-page-body:has(> coco-word-native-table[data-anchor-bottom-margin]) {
+  display: flex;
+}
+
+/* Reserve space in pagination while placing anchored tables below the page's text. */
+coco-word-native-page-body > coco-word-native-table[data-anchor-bottom-margin] {
+  order: 1;
+}
+
+coco-word-native-page-body > coco-word-native-table[data-anchor-bottom-margin]:not([data-anchor-bottom-margin] ~ *) {
+  margin-top: auto;
+}
+
 coco-word-native-page[data-vertical-alignment] > coco-word-native-page-body {
   display: flex;
 }

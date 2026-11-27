@@ -259,6 +259,7 @@ export interface EditorTableLayout {
   cellSpacing?: number;
   cellSpacingType?: 'auto' | 'dxa' | 'pct';
   alignment?: 'left' | 'center' | 'right';
+  anchorToBottomMargin?: true;
 }
 
 export interface EditorTableLook {
